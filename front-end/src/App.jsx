@@ -79,26 +79,65 @@ export default function App() {
   };
 
   // START VOICE RECORD
-  const startRecording = async () => {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const recorder = new MediaRecorder(stream);
+const startRecording = async () => {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-    setChunks([]);
+  const audioCtx = new AudioContext();
+  const source = audioCtx.createMediaStreamSource(stream);
+  const analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 256;
 
-    recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) setChunks((prev) => [...prev, e.data]);
-    };
+  source.connect(analyser);
 
-    recorder.onstop = () => {
-      const blob = new Blob(chunks, { type: "audio/webm" });
-      sendVoice(blob);
-      stream.getTracks().forEach((t) => t.stop());
-    };
+  const canvas = document.getElementById("waveform");
+  const ctx = canvas.getContext("2d");
 
-    recorder.start();
-    setMediaRecorder(recorder);
-    setRecording(true);
+  function drawWave() {
+    requestAnimationFrame(drawWave);
+
+    let dataArray = new Uint8Array(analyser.frequencyBinCount);
+    analyser.getByteFrequencyData(dataArray);
+
+    ctx.fillStyle = "transparent";
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    ctx.strokeStyle = "#0A8754";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+
+    let sliceWidth = canvas.width / dataArray.length;
+    let x = 0;
+
+    for (let i = 0; i < dataArray.length; i++) {
+      let v = dataArray[i] / 255.0;
+      let y = (canvas.height / 2) - (v * 40);
+
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      x += sliceWidth;
+    }
+
+    ctx.stroke();
+  }
+
+  drawWave();
+
+  // Start recorder
+  let localChunks = [];
+  const recorder = new MediaRecorder(stream);
+  
+  recorder.ondataavailable = e => localChunks.push(e.data);
+  recorder.onstop = () => {
+    const blob = new Blob(localChunks, { type: "audio/webm" });
+    sendVoice(blob);
+    stream.getTracks().forEach(t => t.stop());
   };
+
+  recorder.start(200);
+
+  setMediaRecorder(recorder);
+  setRecording(true);
+};
+
 
   // STOP RECORD
   const stopRecording = () => {
@@ -211,21 +250,31 @@ const getUserAvatar = (user) => {
           </div>
 
           {/* VOICE CARD */}
-          <div className="absher-card card-animate">
-            <h2 className="card-title">🎤 التسجيل الصوتي المباشر</h2>
-            <p className="card-desc">
-              اضغط تسجيل وتحدث، وسيتم تحويل صوتك لنص وتحليل النية.
-            </p>
+<div className="absher-card card-animate">
+  <h2 className="card-title">🎤 التسجيل الصوتي المباشر</h2>
+  <p className="card-desc">
+    اضغط تسجيل وتحدث، وسيتم تحويل صوتك لنص وتحليل النية.
+  </p>
 
-            <button
-              className={`absher-btn ${recording ? "absher-btn-danger pulse" : ""}`}
-              onClick={recording ? stopRecording : startRecording}
-            >
-              {recording ? "إيقاف التسجيل" : "ابدأ التسجيل"}
-            </button>
+  <div
+    className="voice-recorder-container"
+    onClick={recording ? stopRecording : startRecording}
+  >
+    <div className={`mic-circle ${recording ? "recording" : ""}`}>
+      <div className="mic-pulse"></div>
+      <i className="fas fa-microphone mic-icon"></i>
+    </div>
 
-            {voiceLoading && <p className="loading-text">⏳ جارٍ معالجة الصوت...</p>}
-          </div>
+    <canvas id="waveform" className="waveform"></canvas>
+
+    <p className="mic-text">
+      {recording ? "جارٍ التسجيل..." : "اضغط وتحدث"}
+    </p>
+  </div>
+
+  {voiceLoading && <p className="loading-text">⏳ جارٍ معالجة الصوت...</p>}
+</div>
+
 
           {/* RESULT CARD */}
           <div className="absher-card card-animate">

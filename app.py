@@ -227,35 +227,43 @@ def switch_user(user_key: str = Form(...)):
 
 import subprocess
 import tempfile
+import uuid
+import os
+import tempfile
+import subprocess
 
 @app.post("/api/voice")
 async def process_voice(file: UploadFile = File(...)):
-    # Read uploaded bytes
     audio_bytes = await file.read()
 
-    # Save webm temporarily
-    with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as temp_webm:
-        temp_webm.write(audio_bytes)
-        temp_webm_path = temp_webm.name
+    # Create explicit temp paths
+    temp_dir = tempfile.gettempdir()
+    webm_path = os.path.join(temp_dir, f"{uuid.uuid4()}.webm")
+    wav_path  = os.path.join(temp_dir, f"{uuid.uuid4()}.wav")
 
-    # Convert to wav for Whisper
-    temp_wav_path = temp_webm_path.replace(".webm", ".wav")
+    # Save webm file
+    with open(webm_path, "wb") as f:
+        f.write(audio_bytes)
 
-    ffmpeg_cmd = [
+    # Convert via ffmpeg
+    cmd = [
         "ffmpeg", "-y",
-        "-i", temp_webm_path,
+        "-i", webm_path,
         "-ar", "16000",
         "-ac", "1",
-        temp_wav_path
+        "-c:a", "pcm_s16le",
+        wav_path
     ]
+    subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-    subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-    # Run whisper on WAV
-    result = whisper_model.transcribe(temp_wav_path, language="ar", fp16=False)
+    # Whisper STT
+    result = whisper_model.transcribe(wav_path, language="ar", fp16=False)
     text = normalize(result["text"])
+    # Clean up temp files
+    print("text:", text)
+    os.remove(webm_path)
+    os.remove(wav_path)
 
-    # Continue logic
     intent = nlu.predict([text])[0]
     cur = STATE["current_user_key"]
 
@@ -264,11 +272,10 @@ async def process_voice(file: UploadFile = File(...)):
 
     return {
         "text": text,
-        "current_user": USERS[STATE["current_user_key"]],
+        "current_user": USERS[cur],
         "visual": visual,
         "recent_requests": STATE["recent_requests"]
     }
-
 
 
 # ============================================
