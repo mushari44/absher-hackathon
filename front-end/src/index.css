@@ -1,0 +1,260 @@
+:root {
+  --absher-green: #006c3c;
+  --absher-light: #eaf4f0;
+  --absher-dark: #004d2a;
+  --absher-accent: #c7ddd2;
+  --bg-body: #f5f7f6;
+  --border-subtle: #d5e4dd;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+body {
+  margin: 0;
+  background-color: var(--bg-body);
+  direction: rtl;
+}
+
+.app-root {
+  display: flex;
+  min-height: 100vh;
+}
+
+/* Sidebar */
+
+.sidebar {
+  width: 300px;
+  background: var(--absher-light);
+  border-left: 1px solid var(--border-subtle);
+  padding: 1.5rem;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.logo-emoji {
+  font-size: 2rem;
+}
+
+.logo-title {
+  font-weight: 700;
+  color: var(--absher-dark);
+}
+
+.logo-sub {
+  font-size: 0.8rem;
+  color: #4d6b5c;
+}
+
+.sidebar-section h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+  color: var(--absher-dark);
+}
+
+.user-card {
+  padding: 0.9rem;
+  border-radius: 0.75rem;
+  background: white;
+  border: 1px solid var(--border-subtle);
+}
+
+.user-name {
+  font-weight: 600;
+  color: var(--absher-dark);
+}
+
+.user-type {
+  font-size: 0.85rem;
+  color: #607f70;
+  margin-top: 0.25rem;
+}
+
+.user-id {
+  font-size: 0.8rem;
+  color: #7c9b8c;
+  margin-top: 0.35rem;
+}
+
+.user-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.user-switch-btn {
+  text-align: right;
+  padding: 0.7rem 0.9rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--border-subtle);
+  background: white;
+  cursor: pointer;
+  transition: 0.15s ease-in-out;
+}
+
+.user-switch-btn:hover {
+  border-color: var(--absher-green);
+}
+
+.user-switch-btn.active {
+  border-color: var(--absher-green);
+  background: #dff1e8;
+}
+
+.user-switch-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--absher-dark);
+}
+
+.user-switch-type {
+  font-size: 0.75rem;
+  color: #668676;
+}
+
+/* Main */
+
+.main {
+  flex: 1;
+  padding: 1.8rem 2rem;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+}
+
+.main-header h1 {
+  margin: 0;
+  font-size: 1.7rem;
+  color: var(--absher-dark);
+  border-bottom: 3px solid var(--absher-green);
+  padding-bottom: 0.3rem;
+}
+
+.subtitle {
+  margin-top: 0.4rem;
+  font-size: 0.9rem;
+  color: #5c7367;
+}
+
+.card {
+  background: white;
+  border-radius: 0.9rem;
+  padding: 1.2rem 1.4rem;
+  border: 1px solid var(--border-subtle);
+}
+
+.card h2 {
+  margin-top: 0;
+  font-size: 1.05rem;
+  color: var(--absher-dark);
+}
+
+.text-input-row {
+  display: flex;
+  gap: 0.7rem;
+  margin-top: 0.6rem;
+}
+
+.text-input {
+  flex: 1;
+  padding: 0.6rem 0.8rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--border-subtle);
+  font-size: 0.95rem;
+}
+
+.text-input:focus {
+  outline: none;
+  border-color: var(--absher-green);
+}
+
+.primary-btn {
+  background: var(--absher-green);
+  color: white;
+  border: none;
+  border-radius: 0.6rem;
+  padding: 0 1.3rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.primary-btn:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.hint {
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+  color: #657f70;
+}
+
+.file-upload {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.7rem 1.3rem;
+  border-radius: 0.7rem;
+  border: 1px dashed var(--absher-green);
+  color: var(--absher-dark);
+  font-size: 0.85rem;
+  cursor: pointer;
+  margin-top: 0.6rem;
+  gap: 0.4rem;
+}
+
+.file-upload input {
+  display: none;
+}
+
+.result-card {
+  background: var(--absher-light);
+  border-radius: 0.8rem;
+  padding: 1rem;
+  border: 2px solid var(--absher-green);
+  font-size: 0.9rem;
+  color: var(--absher-dark);
+  line-height: 1.6;
+}
+
+.empty-state {
+  font-size: 0.85rem;
+  color: #7b9186;
+}
+
+.requests-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.request-item {
+  padding: 0.6rem 0.7rem;
+  border-radius: 0.6rem;
+  background: var(--absher-light);
+  border: 1px solid var(--border-subtle);
+  font-size: 0.8rem;
+}
+
+.request-id {
+  font-weight: 600;
+  color: var(--absher-dark);
+  margin-left: 0.5rem;
+}
+
+.request-status {
+  color: #607f70;
+}
+
+.request-meta {
+  margin-top: 0.25rem;
+  color: #6d8779;
+}

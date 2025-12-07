@@ -1,0 +1,349 @@
+/* ============================================================
+   ABSHER GOVERNMENT STYLE SYSTEM
+   Pixel-Perfect UI + Government Animations
+   ============================================================ */
+
+:root {
+  --absher-green: #0E6E4D;
+  --absher-green-dark: #064F35;
+  --absher-light: #F6FAF8;
+  --absher-bg: #F5F7F6;
+  --absher-border: #DDE5E2;
+  --absher-text-dark: #144B35;
+  --absher-text: #5F6F64;
+  --absher-shadow: 0 4px 18px rgba(0, 0, 0, 0.06);
+  --transition-fast: 0.22s ease-in-out;
+  font-family: "Segoe UI", Tahoma, sans-serif;
+}
+
+body {
+  background: var(--absher-bg);
+  margin: 0;
+  direction: rtl;
+  text-align: right;
+}
+
+/* ==========================
+   PAGE FADE-IN
+========================== */
+.fade-in {
+  opacity: 0;
+  animation: fadeIn 0.4s ease forwards;
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ==========================
+   SLIDE UP CARD ANIMATION
+========================== */
+.card-animate {
+  opacity: 0;
+  transform: translateY(14px);
+  animation: slideUp 0.45s cubic-bezier(.19,1,.22,1) forwards;
+}
+@keyframes slideUp {
+  0% { opacity: 0; transform: translateY(18px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+/* ==========================
+   SLIDE IN SIDEBAR
+========================== */
+.slide-right {
+  opacity: 0;
+  transform: translateX(20px);
+  animation: slideRight 0.45s cubic-bezier(.19,1,.22,1) forwards;
+}
+@keyframes slideRight {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* ==========================
+   HEADER
+========================== */
+
+.absher-header {
+  background: white;
+  border-bottom: 1px solid var(--absher-border);
+  padding: 10px 26px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.gov-logo {
+  height: 56px;
+  object-fit: contain;
+}
+
+.absher-center-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.absher-main-logo {
+  height: 54px;
+}
+
+.absher-center-header h2 {
+  margin: 4px 0 0;
+  font-size: 18px;
+  color: var(--absher-green-dark);
+  font-weight: bold;
+}
+
+/* ==========================
+   LAYOUT
+========================== */
+
+.absher-layout {
+  display: flex;
+  height: calc(100vh - 90px);
+}
+
+/* ==========================
+   SIDEBAR
+========================== */
+
+.absher-sidebar {
+  width: 260px;
+  padding: 24px;
+  background: var(--absher-light);
+  border-left: 1px solid var(--absher-border);
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+}
+
+.absher-shadow {
+  box-shadow: var(--absher-shadow);
+}
+
+.sidebar-title {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: bold;
+  color: var(--absher-text-dark);
+}
+
+.sidebar-users {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sidebar-user-btn {
+  background: white;
+  border: 1px solid var(--absher-border);
+  padding: 10px 16px;
+  border-radius: 10px;
+  text-align: right;
+  transition: var(--transition-fast);
+}
+
+.sidebar-user-btn .name {
+  font-weight: 600;
+  color: var(--absher-text-dark);
+}
+
+.sidebar-user-btn .type {
+  font-size: 12px;
+  color: var(--absher-text);
+}
+
+.sidebar-user-btn:hover {
+  border-color: var(--absher-green);
+}
+
+.sidebar-user-btn.active {
+  border-color: var(--absher-green);
+  background: #E3F2EB;
+}
+
+/* Sidebar Hint */
+
+.sidebar-hint p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--absher-text-dark);
+}
+
+.sidebar-hint ul {
+  margin: 6px 0 0;
+  padding-right: 18px;
+  color: var(--absher-text);
+  font-size: 12px;
+}
+
+
+/* ==========================
+   MAIN CONTENT
+========================== */
+
+.absher-main {
+  flex: 1;
+  padding: 28px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+/* ==========================
+   CARDS
+========================== */
+
+.absher-card {
+  background: #FFFFFF;
+  border: 1px solid var(--absher-border);
+  border-radius: 14px;
+  padding: 18px 22px;
+}
+
+.card-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: bold;
+  color: var(--absher-text-dark);
+}
+
+.card-desc {
+  font-size: 13px;
+  margin-top: 6px;
+  color: var(--absher-text);
+}
+
+/* ==========================
+   TEXT INPUT AREA
+========================== */
+
+.text-row {
+  margin-top: 12px;
+  display: flex;
+  gap: 14px;
+}
+
+.absher-input {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--absher-border);
+  font-size: 14px;
+  transition: var(--transition-fast);
+}
+
+.absher-input:focus {
+  border-color: var(--absher-green);
+}
+
+/* ==========================
+   BUTTONS (ABSHEr GREEN)
+========================== */
+
+.absher-btn {
+  background: var(--absher-green);
+  color: white;
+  padding: 8px 20px;
+  border-radius: 8px;
+  border: none;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.22s ease;
+}
+
+.absher-btn:hover {
+  background: var(--absher-green-dark);
+  transform: translateY(-2px);
+}
+
+.absher-btn:active {
+  transform: scale(0.96);
+}
+
+.absher-btn:disabled {
+  opacity: 0.6;
+  transform: none;
+  cursor: default;
+}
+
+/* Danger mode for voice record */
+.absher-btn-danger {
+  background: #D93636 !important;
+}
+
+/* Microphone Pulse */
+.pulse {
+  animation: pulseAnim 1.6s infinite;
+}
+
+@keyframes pulseAnim {
+  0% {
+    box-shadow: 0 0 0 0 rgba(217, 54, 54, 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 14px rgba(217, 54, 54, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(217, 54, 54, 0);
+  }
+}
+
+/* ==========================
+   RESULT OUTPUT
+========================== */
+
+.absher-result {
+  margin-top: 10px;
+  background: var(--absher-light);
+  border: 1px solid var(--absher-border);
+  padding: 14px;
+  border-radius: 10px;
+  color: var(--absher-text-dark);
+  line-height: 1.7;
+}
+
+/* ==========================
+   REQUESTS LIST
+========================== */
+
+.requests-list {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.request-item {
+  background: var(--absher-light);
+  border-radius: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--absher-border);
+}
+
+.request-main {
+  display: flex;
+  justify-content: space-between;
+  font-weight: bold;
+  color: var(--absher-text-dark);
+}
+
+.request-meta {
+  font-size: 12px;
+  margin-top: 4px;
+  color: var(--absher-text);
+}
+
+
+/* ==========================
+   LOADING TEXT
+========================== */
+
+.loading-text {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--absher-text);
+}
