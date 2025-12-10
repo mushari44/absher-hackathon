@@ -259,10 +259,10 @@ const getBotAvatar = (user) => {
                 }
               >
 <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-  <img 
+  <img
     src={getUserAvatar(user)}
     alt="avatar"
-    style={{ width: "42px", height: "42px", borderRadius: "50%" }}
+    className="sidebar-user-avatar"
   />
   <div>
     <div className="name">{user.name}</div>

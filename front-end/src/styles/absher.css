@@ -178,6 +178,13 @@ button {
   background: #E3F2EB;
 }
 
+.sidebar-user-avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
 /* Sidebar Hint */
 
 .sidebar-hint p {
@@ -844,6 +851,11 @@ button {
     flex-shrink: 0;
   }
 
+  .sidebar-user-avatar {
+    width: 36px;
+    height: 36px;
+  }
+
   .sidebar-hint {
     display: none; /* Hide hints on mobile to save space */
   }
@@ -1008,6 +1020,11 @@ button {
   .sidebar-user-btn {
     min-width: 120px;
     font-size: 13px;
+  }
+
+  .sidebar-user-avatar {
+    width: 32px;
+    height: 32px;
   }
 
   .sidebar-user-btn .name {
