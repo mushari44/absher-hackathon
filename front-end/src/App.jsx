@@ -11,7 +11,7 @@ import SaudiWoman from "./assets/saudi_woman.png";
 import RobotMan from "./assets/robot_man.png";
 import RobotWoman from "./assets/robot_woman.png";
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = "https://twee-televisional-marni.ngrok-free.dev";
 
 export default function App() {
   const [users, setUsers] = useState({});
@@ -32,7 +32,8 @@ export default function App() {
     const load = async () => {
       const usersRes = await fetch(`${API_BASE}/api/users`);
       const stateRes = await fetch(`${API_BASE}/api/state`);
-
+      console.log(usersRes);
+      
       const usersData = await usersRes.json();
       const stateData = await stateRes.json();
 

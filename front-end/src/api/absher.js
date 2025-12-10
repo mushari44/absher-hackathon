@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const API = "http://localhost:8000/api";
+const API = "https://twee-televisional-marni.ngrok-free.dev/api";
 
 export const sendText = (user, text) =>
   axios.post(`${API}/text`, { user, text });
