@@ -21,6 +21,20 @@ body {
   margin: 0;
   direction: rtl;
   text-align: right;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Prevent text selection on buttons for better mobile UX */
+button {
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
 }
 
 /* ==========================
@@ -730,4 +744,324 @@ body {
 .send-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* ==========================
+   RESPONSIVE DESIGN
+========================== */
+
+/* Tablet (768px - 1024px) */
+@media (max-width: 1024px) {
+  .absher-sidebar {
+    width: 220px;
+  }
+
+  .absher-main {
+    padding: 20px;
+    gap: 18px;
+  }
+
+  .chat-container {
+    height: calc(100vh - 250px);
+  }
+}
+
+/* Mobile (max-width: 767px) */
+@media (max-width: 767px) {
+  body {
+    font-size: 14px;
+  }
+
+  /* Header adjustments */
+  .absher-header {
+    padding: 8px 16px;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .gov-logo {
+    height: 40px;
+  }
+
+  .absher-main-logo {
+    height: 40px;
+  }
+
+  .absher-center-header h2 {
+    font-size: 14px;
+  }
+
+  /* Layout becomes vertical on mobile */
+  .absher-layout {
+    flex-direction: column;
+    height: auto;
+    min-height: calc(100vh - 120px);
+  }
+
+  /* Sidebar becomes horizontal on mobile */
+  .absher-sidebar {
+    width: 100%;
+    padding: 16px;
+    border-left: none;
+    border-bottom: 1px solid var(--absher-border);
+    gap: 16px;
+  }
+
+  .sidebar-users {
+    flex-direction: row;
+    overflow-x: auto;
+    gap: 8px;
+    padding-bottom: 8px;
+    -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
+    scrollbar-width: thin; /* Firefox */
+  }
+
+  /* Hide scrollbar for Chrome/Safari but keep functionality */
+  .sidebar-users::-webkit-scrollbar {
+    height: 4px;
+  }
+
+  .sidebar-users::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .sidebar-users::-webkit-scrollbar-thumb {
+    background: var(--absher-border);
+    border-radius: 10px;
+  }
+
+  .sidebar-user-btn {
+    min-width: 140px;
+    flex-shrink: 0;
+  }
+
+  .sidebar-hint {
+    display: none; /* Hide hints on mobile to save space */
+  }
+
+  /* Main content */
+  .absher-main {
+    padding: 16px;
+    gap: 16px;
+    overflow-y: visible;
+  }
+
+  /* Chat container */
+  .chat-container {
+    height: calc(100vh - 380px);
+    min-height: 400px;
+  }
+
+  .chat-header {
+    padding: 14px 16px;
+  }
+
+  .card-title {
+    font-size: 15px;
+  }
+
+  .card-desc {
+    font-size: 12px;
+  }
+
+  /* Chat messages */
+  .chat-messages {
+    padding: 12px;
+    gap: 12px;
+  }
+
+  .message-content {
+    max-width: 85%; /* Wider on mobile */
+    padding: 10px 12px;
+    font-size: 14px;
+  }
+
+  .message-avatar {
+    width: 32px;
+    height: 32px;
+  }
+
+  .message-steps {
+    font-size: 12px;
+  }
+
+  /* Empty state */
+  .empty-icon img {
+    width: 60px !important;
+    height: 60px !important;
+  }
+
+  .chat-empty p {
+    font-size: 14px;
+  }
+
+  .suggestions {
+    flex-direction: column;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .suggestion-btn {
+    width: 100%;
+    text-align: center;
+    padding: 12px 16px;
+  }
+
+  /* Input area */
+  .chat-input-area {
+    padding: 12px 16px;
+  }
+
+  .chat-input-row {
+    gap: 8px;
+  }
+
+  .voice-btn {
+    width: 40px;
+    height: 40px;
+    font-size: 16px;
+  }
+
+  .send-btn {
+    width: 40px;
+    height: 40px;
+    font-size: 14px;
+  }
+
+  .chat-input {
+    padding: 10px 14px;
+    font-size: 14px;
+  }
+
+  /* Recording indicator */
+  .recording-indicator {
+    font-size: 12px;
+    padding: 6px 10px;
+  }
+
+  .waveform-mini {
+    width: 80px;
+    height: 25px;
+  }
+
+  /* Requests card */
+  .absher-card {
+    padding: 14px 16px;
+  }
+
+  .requests-list {
+    gap: 8px;
+  }
+
+  .request-item {
+    padding: 8px 12px;
+  }
+
+  .request-main {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .request-meta {
+    font-size: 11px;
+  }
+
+  /* Voice badge */
+  .voice-badge {
+    font-size: 10px;
+    padding: 3px 6px;
+  }
+}
+
+/* Small mobile (max-width: 480px) */
+@media (max-width: 480px) {
+  .absher-header {
+    padding: 6px 12px;
+  }
+
+  .gov-logo {
+    height: 35px;
+  }
+
+  .absher-main-logo {
+    height: 35px;
+  }
+
+  .absher-center-header h2 {
+    font-size: 12px;
+  }
+
+  .chat-container {
+    height: calc(100vh - 350px);
+    min-height: 350px;
+  }
+
+  .sidebar-user-btn {
+    min-width: 120px;
+    font-size: 13px;
+  }
+
+  .sidebar-user-btn .name {
+    font-size: 13px;
+  }
+
+  .sidebar-user-btn .type {
+    font-size: 11px;
+  }
+
+  .message-content {
+    max-width: 90%;
+    font-size: 13px;
+  }
+
+  .chat-input {
+    font-size: 13px;
+    padding: 8px 12px;
+  }
+}
+
+/* Landscape orientation adjustments */
+@media (max-width: 767px) and (orientation: landscape) {
+  .chat-container {
+    height: 60vh;
+    min-height: 300px;
+  }
+
+  .absher-layout {
+    height: auto;
+  }
+}
+
+/* Touch device optimizations */
+@media (hover: none) and (pointer: coarse) {
+  /* Larger touch targets */
+  .voice-btn,
+  .send-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .suggestion-btn {
+    min-height: 44px;
+  }
+
+  .sidebar-user-btn {
+    min-height: 50px;
+  }
+
+  /* Remove hover effects on touch devices */
+  .voice-btn:hover,
+  .send-btn:hover,
+  .suggestion-btn:hover,
+  .sidebar-user-btn:hover {
+    transform: none;
+  }
+
+  /* Add active states instead */
+  .voice-btn:active,
+  .send-btn:active,
+  .suggestion-btn:active {
+    transform: scale(0.95);
+  }
 }
