@@ -27,24 +27,39 @@ export default function App() {
   const [recording, setRecording] = useState(false);
   const [mediaRecorder, setMediaRecorder] = useState(null);
 
-  // INITIAL LOAD
-  useEffect(() => {
-    const load = async () => {
-      const usersRes = await fetch(`${API_BASE}/api/users`);
-      const stateRes = await fetch(`${API_BASE}/api/state`);
-      console.log(usersRes);
-      
+useEffect(() => {
+  const load = async () => {
+    try {
+      const usersRes = await fetch(`${API_BASE}/api/users`, {
+        headers: {
+          "ngrok-skip-browser-warning": "true"
+        }
+      });
+
       const usersData = await usersRes.json();
+      console.log("usersData:", usersData);
+
+      const stateRes = await fetch(`${API_BASE}/api/state`, {
+        headers: {
+          "ngrok-skip-browser-warning": "true"
+        }
+      });
+
       const stateData = await stateRes.json();
+      console.log("stateData:", stateData);
 
       setUsers(usersData);
       setCurrentUser(usersData[stateData.current_user_key]);
       setCurrentUserKey(stateData.current_user_key);
       setRecentRequests(stateData.recent_requests || []);
-    };
 
-    load();
-  }, []);
+    } catch (err) {
+      console.error("LOAD ERROR:", err);
+    }
+  };
+
+  load();
+}, []);
 
   // SEND TEXT COMMAND
   const sendCommand = async () => {
