@@ -464,29 +464,28 @@ button {
   gap: 16px;
 }
 
-/* Empty state */
 .chat-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  height: 100%;
+  justify-content: flex-start; /* instead of center */
   text-align: center;
   color: var(--absher-text);
+  padding-top: 40px;           /* gives breathing room */
+  overflow: visible;           /* prevents clipping */
 }
 
 .empty-icon {
-  font-size: 64px;
+  width: 120px;
+  height: 120px;
   margin-bottom: 16px;
+  overflow: visible; /* important */
 }
-
 .empty-robot {
-  width: 80px;
-  height: 80px;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;  /* ensures full image appears */
   border-radius: 50%;
-  object-fit: contain;
-  border: 2px solid var(--absher-border);
-  background: var(--absher-light);
 }
 
 .suggestions {
