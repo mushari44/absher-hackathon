@@ -473,6 +473,14 @@ button {
   margin-bottom: 16px;
 }
 
+.empty-robot {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid var(--absher-border);
+}
+
 .suggestions {
   display: flex;
   gap: 10px;
@@ -887,9 +895,9 @@ button {
   }
 
   /* Empty state */
-  .empty-icon img {
-    width: 60px !important;
-    height: 60px !important;
+  .empty-robot {
+    width: 60px;
+    height: 60px;
   }
 
   .chat-empty p {
@@ -1018,6 +1026,16 @@ button {
   .chat-input {
     font-size: 13px;
     padding: 8px 12px;
+  }
+
+  /* Even smaller robot icon on very small screens */
+  .empty-robot {
+    width: 50px;
+    height: 50px;
+  }
+
+  .chat-empty p {
+    font-size: 13px;
   }
 }
 

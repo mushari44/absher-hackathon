@@ -299,7 +299,7 @@ const getBotAvatar = (user) => {
               {messages.length === 0 ? (
                 <div className="chat-empty">
                   <div className="empty-icon">
-                    <img src={getBotAvatar(currentUser)} alt="Robot" style={{ width: "80px", height: "80px", borderRadius: "50%" }} />
+                    <img src={getBotAvatar(currentUser)} alt="Robot" className="empty-robot" />
                   </div>
                   <p>مرحباً! كيف يمكنني مساعدتك اليوم؟</p>
                   <div className="suggestions">
