@@ -476,9 +476,8 @@ button {
 }
 
 .empty-icon {
-  width: 120px;
-  height: 120px;
-  margin-bottom: 16px;
+  width: min(20vw, 120px);
+  height: min(20vw, 120px);
   overflow: visible; /* important */
 }
 .empty-robot {
