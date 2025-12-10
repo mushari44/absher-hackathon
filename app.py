@@ -71,9 +71,6 @@ STATE = {
     "recent_requests": []
 }
 
-# ============================================
-# FASTAPI APP
-# ============================================
 
 app = FastAPI()
 
@@ -87,51 +84,123 @@ app.add_middleware(
 )
 
 
-# ============================================
-# Load Whisper + NLU Model
-# ============================================
 
-import joblib
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import LogisticRegression
-from sklearn.pipeline import Pipeline
 
-# Train NLU model
-NLU_DATA = {
-    "text": [
-        "أجدد رخصتي", "رخصتي منتهية", "أبي تجديد قيادة",
-        "جوازي خلص", "أحتاج تجديد جواز السفر",
-        "احجز موعد", "أبغى موعد جوازات",
-        "كم باقي على الإقامة", "متى تنتهي الهوية",
-        "أجدد الهوية", "الإقامة خلصت",
-        "change user to alex", "غير المستخدم",
-        "مرحبا", "hello",
-    ],
-    "intent": [
-        "renew_license", "renew_license", "renew_license",
-        "renew_passport", "renew_passport",
-        "appointment", "appointment",
-        "check_expiry", "check_expiry",
-        "renew_id", "renew_id",
-        "switch_user", "switch_user",
-        "greeting", "greeting",
-    ],
-}
+import google.generativeai as genai
+import os
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyCJFoBe7oMe3apapQSyqwhOO_HSwQ5DJdE")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+else:
+    print("⚠️ Warning: GEMINI_API_KEY not set. Please set it as an environment variable.")
 
-df = pd.DataFrame(NLU_DATA)
-
-nlu = Pipeline([
-    ('vectorizer', TfidfVectorizer()),
-    ('clf', LogisticRegression(max_iter=1000))
-])
-nlu.fit(df["text"], df["intent"])
+gemini_model = genai.GenerativeModel('gemini-2.5-flash')
 
 whisper_model = whisper.load_model("large-v3")
 
+def generate_action_steps(intent: str, user_text: str) -> str:
+    """
+    LLM #2: Takes the intent from LLM #1 and generates the ABSHER steps.
+    Example:
+      intent = "renew_passport"
+      return: "1. افتح منصة أبشر ... 2. اختر خدماتي ... إلخ"
+    """
 
-# ============================================
-# Helper Functions
-# ============================================
+    prompt = f"""
+أنت مساعد مختص بشرح خطوات تنفيذ خدمات منصة أبشر للمستخدمين.
+
+المهمة:
+- لديك نية inferred intent حددها نظام آخر: "{intent}"
+- ولديك النص الأصلي للمستخدم: "{user_text}"
+
+أعطِ خطوات واضحة ومختصرة لتنفيذ هذه الخدمة على منصة أبشر.
+اكتب فقط الخطوات بدون أي شرح إضافي.
+
+أمثلة النوايا:
+- renew_id = خطوات تجديد الهوية/الإقامة
+- renew_passport = خطوات تجديد الجواز
+- renew_license = خطوات تجديد رخصة القيادة
+- appointment = خطوات حجز موعد
+- check_expiry = خطوات الاستعلام عن صلاحية الهوية
+
+ابدأ الرد مباشرة بالخطوات.
+"""
+
+    try:
+        response = gemini_model.generate_content(prompt)
+        return response.text.strip()
+
+    except Exception as e:
+        print(f"Error in LLM Action Generator: {e}")
+        return "تعذر جلب خطوات الخدمة حالياً."
+
+def detect_intent_with_gemini(user_text: str) -> str:
+    """
+    Use Gemini LLM to intelligently detect the intent of the user's query.
+    Returns one of: renew_license, renew_passport, appointment, check_expiry,
+                    renew_id, switch_user, greeting, unknown
+    """
+    prompt = f"""You are an intent classifier for a Saudi Arabian government services system (ABSHER).
+
+Given the user's input text (in Arabic or English), classify it into ONE of these intents:
+
+**Available Intents:**
+1. **renew_license** - User wants to renew their driver's license (رخصة القيادة)
+2. **renew_passport** - User wants to renew their passport (جواز السفر)
+3. **appointment** - User wants to book an appointment (موعد)
+4. **check_expiry** - User wants to check when their ID/residence expires (صلاحية الهوية/الإقامة)
+5. **renew_id** - User wants to renew their national ID or residence permit (الهوية/الإقامة)
+6. **switch_user** - User wants to change the current user/account
+7. **greeting** - User is greeting (hello, hi, مرحبا, etc.)
+8. **unknown** - None of the above intents match
+
+**User Input:** "{user_text}"
+
+**Instructions:**
+- Respond with ONLY the intent name (e.g., "renew_license")
+- Do not include any explanation, just the intent name
+- Be flexible with Arabic dialects and variations
+- Consider context and common phrasings
+
+**Your Response (intent only):**"""
+
+    try:
+        response = gemini_model.generate_content(prompt)
+        print("Gemini response:", response.text)
+        intent = response.text.strip().lower()
+        print("Detected intent:", intent)
+        # Validate the intent is one of the expected values
+        valid_intents = ["renew_license", "renew_passport", "appointment",
+                        "check_expiry", "renew_id", "switch_user", "greeting", "unknown"]
+
+        if intent in valid_intents:
+            return intent
+        else:
+            # If Gemini returns something unexpected, try to map it
+            for valid_intent in valid_intents:
+                if valid_intent in intent:
+                    return valid_intent
+            return "unknown"
+    except Exception as e:
+        print(f"❌ Error calling Gemini API: {e}")
+        # Fallback to basic keyword matching if Gemini fails
+        text_lower = user_text.lower()
+        if any(word in text_lower for word in ["رخصة", "قيادة", "license", "driving"]):
+            return "renew_license"
+        elif any(word in text_lower for word in ["جواز", "passport"]):
+            return "renew_passport"
+        elif any(word in text_lower for word in ["موعد", "appointment", "احجز"]):
+            return "appointment"
+        elif any(word in text_lower for word in ["صلاحية", "expiry", "تنتهي", "باقي"]):
+            return "check_expiry"
+        elif any(word in text_lower for word in ["هوية", "إقامة", "identity", "residence"]):
+            return "renew_id"
+        elif any(word in text_lower for word in ["switch", "change", "غير", "user"]):
+            return "switch_user"
+        elif any(word in text_lower for word in ["مرحبا", "hello", "hi", "السلام"]):
+            return "greeting"
+        return "unknown"
+
 
 def create_request(user_key, service_id, status="submitted"):
     req = {
@@ -183,9 +252,6 @@ def handle_intent(user_key, intent):
     return "لم أفهم أمرك."
 
 
-# ============================================
-# API ROUTES
-# ============================================
 
 @app.get("/api/users")
 def get_users():
@@ -204,15 +270,25 @@ class TextCommand(BaseModel):
 @app.post("/api/command")
 def process_text(cmd: TextCommand):
     text = normalize(cmd.text)
-    intent = nlu.predict([text])[0]
-    cur = STATE["current_user_key"]
 
+    # 1) LLM #1 — Intent
+    intent = detect_intent_with_gemini(text)
+
+    # 2) Execute the system logic
+    cur = STATE["current_user_key"]
     visual = handle_intent(cur, intent)
+
+    # 3) LLM #2 — Action Steps
+    steps = generate_action_steps(intent, cmd.text)
+    print("Generated Steps:", steps)
     STATE["last_visual"] = visual
 
     return {
-        "current_user": USERS[STATE["current_user_key"]],
+        "intent": intent,
+        "text": cmd.text,
+        "current_user": USERS[cur],
         "visual": visual,
+        "action_steps": steps,
         "recent_requests": STATE["recent_requests"]
     }
 
@@ -264,16 +340,20 @@ async def process_voice(file: UploadFile = File(...)):
     os.remove(webm_path)
     os.remove(wav_path)
 
-    intent = nlu.predict([text])[0]
+    intent = detect_intent_with_gemini(text)
     cur = STATE["current_user_key"]
 
     visual = handle_intent(cur, intent)
     STATE["last_visual"] = visual
 
+    steps = generate_action_steps(intent, text)
+
     return {
         "text": text,
+        "intent": intent,
         "current_user": USERS[cur],
         "visual": visual,
+        "action_steps": steps,
         "recent_requests": STATE["recent_requests"]
     }
 

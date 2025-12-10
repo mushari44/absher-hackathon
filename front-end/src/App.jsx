@@ -8,6 +8,8 @@ import MoiLogo from "./assets/moi.svg";
 import Vision2030 from "./assets/vision2030.png";
 import SaudiMan from "./assets/saudi_man.png";
 import SaudiWoman from "./assets/saudi_woman.png";
+import RobotMan from "./assets/robot_man.png";
+import RobotWoman from "./assets/robot_woman.png";
 
 const API_BASE = "http://localhost:8000";
 
@@ -16,16 +18,14 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [currentUserKey, setCurrentUserKey] = useState("");
 
-  const [lastVisual, setLastVisual] = useState("");
   const [recentRequests, setRecentRequests] = useState([]);
+  const [messages, setMessages] = useState([]); // ChatGPT-like conversation history
 
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
 
   const [recording, setRecording] = useState(false);
   const [mediaRecorder, setMediaRecorder] = useState(null);
-  const [chunks, setChunks] = useState([]);
-  const [voiceLoading, setVoiceLoading] = useState(false);
 
   // INITIAL LOAD
   useEffect(() => {
@@ -37,9 +37,8 @@ export default function App() {
       const stateData = await stateRes.json();
 
       setUsers(usersData);
-      setCurrentUser(stateData.current_user);
+      setCurrentUser(usersData[stateData.current_user_key]);
       setCurrentUserKey(stateData.current_user_key);
-      setLastVisual(stateData.last_visual || "");
       setRecentRequests(stateData.recent_requests || []);
     };
 
@@ -50,18 +49,32 @@ export default function App() {
   const sendCommand = async () => {
     if (!text.trim()) return;
 
+    // Add user message to chat
+    const userMessage = { type: "user", text: text };
+    setMessages((prev) => [...prev, userMessage]);
+
+    const userInput = text;
+    setText("");
     setLoading(true);
+
     const res = await fetch(`${API_BASE}/api/command`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text: userInput }),
     });
 
     const data = await res.json();
     setCurrentUser(data.current_user);
-    setLastVisual(data.visual);
     setRecentRequests(data.recent_requests || []);
-    setText("");
+
+    // Add assistant response to chat
+    const assistantMessage = {
+      type: "assistant",
+      text: data.visual,
+      steps: data.action_steps,
+      intent: data.intent,
+    };
+    setMessages((prev) => [...prev, assistantMessage]);
     setLoading(false);
   };
 
@@ -79,75 +92,88 @@ export default function App() {
   };
 
   // START VOICE RECORD
-const startRecording = async () => {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-  const audioCtx = new AudioContext();
-  const source = audioCtx.createMediaStreamSource(stream);
-  const analyser = audioCtx.createAnalyser();
-  analyser.fftSize = 256;
+      // Set recording state first
+      setRecording(true);
 
-  source.connect(analyser);
+      // Start recorder
+      let localChunks = [];
+      const recorder = new MediaRecorder(stream);
 
-  const canvas = document.getElementById("waveform");
-  const ctx = canvas.getContext("2d");
+      recorder.ondataavailable = e => localChunks.push(e.data);
+      recorder.onstop = () => {
+        const blob = new Blob(localChunks, { type: "audio/webm" });
+        sendVoice(blob);
+        stream.getTracks().forEach(t => t.stop());
+      };
 
-  function drawWave() {
-    requestAnimationFrame(drawWave);
+      recorder.start(200);
+      setMediaRecorder(recorder);
 
-    let dataArray = new Uint8Array(analyser.frequencyBinCount);
-    analyser.getByteFrequencyData(dataArray);
+      // Setup waveform visualization after state is set
+      setTimeout(() => {
+        const canvas = document.getElementById("waveform");
+        if (canvas) {
+          const audioCtx = new AudioContext();
+          const source = audioCtx.createMediaStreamSource(stream);
+          const analyser = audioCtx.createAnalyser();
+          analyser.fftSize = 256;
+          source.connect(analyser);
 
-    ctx.fillStyle = "transparent";
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+          const ctx = canvas.getContext("2d");
 
-    ctx.strokeStyle = "#0A8754";
-    ctx.lineWidth = 3;
-    ctx.beginPath();
+          function drawWave() {
+            if (!recorder || recorder.state === "inactive") return;
+            requestAnimationFrame(drawWave);
 
-    let sliceWidth = canvas.width / dataArray.length;
-    let x = 0;
+            let dataArray = new Uint8Array(analyser.frequencyBinCount);
+            analyser.getByteFrequencyData(dataArray);
 
-    for (let i = 0; i < dataArray.length; i++) {
-      let v = dataArray[i] / 255.0;
-      let y = (canvas.height / 2) - (v * 40);
+            ctx.fillStyle = "transparent";
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-      x += sliceWidth;
+            ctx.strokeStyle = "#0A8754";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+
+            let sliceWidth = canvas.width / dataArray.length;
+            let x = 0;
+
+            for (let i = 0; i < dataArray.length; i++) {
+              let v = dataArray[i] / 255.0;
+              let y = (canvas.height / 2) - (v * 15);
+
+              i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+              x += sliceWidth;
+            }
+
+            ctx.stroke();
+          }
+
+          drawWave();
+        }
+      }, 100);
+    } catch (error) {
+      console.error("Error starting recording:", error);
+      alert("تعذر الوصول إلى الميكروفون. يرجى السماح بالوصول للميكروفون.");
     }
-
-    ctx.stroke();
-  }
-
-  drawWave();
-
-  // Start recorder
-  let localChunks = [];
-  const recorder = new MediaRecorder(stream);
-  
-  recorder.ondataavailable = e => localChunks.push(e.data);
-  recorder.onstop = () => {
-    const blob = new Blob(localChunks, { type: "audio/webm" });
-    sendVoice(blob);
-    stream.getTracks().forEach(t => t.stop());
   };
-
-  recorder.start(200);
-
-  setMediaRecorder(recorder);
-  setRecording(true);
-};
 
 
   // STOP RECORD
   const stopRecording = () => {
-    mediaRecorder.stop();
+    if (mediaRecorder && mediaRecorder.state !== "inactive") {
+      mediaRecorder.stop();
+    }
     setRecording(false);
   };
 
   // SEND VOICE
   const sendVoice = async (blob) => {
-    setVoiceLoading(true);
+    setLoading(true);
 
     const formData = new FormData();
     formData.append("file", blob, "voice.webm");
@@ -159,14 +185,31 @@ const startRecording = async () => {
 
     const data = await res.json();
     setCurrentUser(data.current_user);
-    setLastVisual(data.visual);
     setRecentRequests(data.recent_requests || []);
 
-    setVoiceLoading(false);
+    // Add user voice message
+    const userMessage = { type: "user", text: data.text, isVoice: true };
+    setMessages((prev) => [...prev, userMessage]);
+
+    // Add assistant response
+    const assistantMessage = {
+      type: "assistant",
+      text: data.visual,
+      steps: data.action_steps,
+      intent: data.intent,
+    };
+    setMessages((prev) => [...prev, assistantMessage]);
+
+    setLoading(false);
   };
 const getUserAvatar = (user) => {
   if (!user) return SaudiMan;
   return user.gender === "female" ? SaudiWoman : SaudiMan;
+};
+
+const getBotAvatar = (user) => {
+  if (!user) return RobotMan;
+  return user.gender === "female" ? RobotWoman : RobotMan;
 };
 
   return (
@@ -228,65 +271,108 @@ const getUserAvatar = (user) => {
         {/* ============== MAIN CONTENT ============== */}
         <main className="absher-main">
 
-          {/* TEXT INPUT CARD */}
-          <div className="absher-card card-animate">
-            <h2 className="card-title">📝 إدخال نصي</h2>
-            <p className="card-desc">
-              اكتب طلبك باللغة العربية أو الإنجليزية وسيقوم المساعد بتحديد الخدمة تلقائيًا.
-            </p>
-
-            <div className="text-row">
-              <button className="absher-btn" onClick={sendCommand} disabled={loading}>
-                {loading ? "جاري..." : "إرسال"}
-              </button>
-
-              <input
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                className="absher-input"
-                placeholder="مثال: جدد الإقامة، كم المخالفات؟"
-              />
+          {/* CHAT INTERFACE - ChatGPT Style */}
+          <div className="chat-container card-animate">
+            <div className="chat-header">
+              <h2 className="card-title">💬 مساعد أبشر الذكي</h2>
+              <p className="card-desc">اكتب أو تحدث لتنفيذ خدماتك</p>
             </div>
-          </div>
 
-          {/* VOICE CARD */}
-<div className="absher-card card-animate">
-  <h2 className="card-title">🎤 التسجيل الصوتي المباشر</h2>
-  <p className="card-desc">
-    اضغط تسجيل وتحدث، وسيتم تحويل صوتك لنص وتحليل النية.
-  </p>
+            {/* Messages Area */}
+            <div className="chat-messages">
+              {messages.length === 0 ? (
+                <div className="chat-empty">
+                  <div className="empty-icon">
+                    <img src={getBotAvatar(currentUser)} alt="Robot" style={{ width: "80px", height: "80px", borderRadius: "50%" }} />
+                  </div>
+                  <p>مرحباً! كيف يمكنني مساعدتك اليوم؟</p>
+                  <div className="suggestions">
+                    <button onClick={() => setText("جدد رخصتي")} className="suggestion-btn">
+                      جدد رخصتي
+                    </button>
+                    <button onClick={() => setText("كم باقي على الإقامة؟")} className="suggestion-btn">
+                      كم باقي على الإقامة؟
+                    </button>
+                    <button onClick={() => setText("أبغى موعد جوازات")} className="suggestion-btn">
+                      أبغى موعد جوازات
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                messages.map((msg, idx) => (
+                  <div key={idx} className={`chat-message ${msg.type}`}>
+                    <div className="message-avatar">
+                      {msg.type === "user" ? (
+                        <img src={getUserAvatar(currentUser)} alt="User" />
+                      ) : (
+                        <img src={getBotAvatar(currentUser)} alt="Robot" />
+                      )}
+                    </div>
+                    <div className="message-content">
+                      {msg.isVoice && <span className="voice-badge">🎤 صوتي</span>}
+                      <div className="message-text">{msg.text}</div>
+                      {msg.steps && (
+                        <div className="message-steps">
+                          <strong>📋 خطوات التنفيذ:</strong>
+                          <div dangerouslySetInnerHTML={{ __html: msg.steps.replace(/\n/g, "<br/>") }} />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+              {loading && (
+                <div className="chat-message assistant">
+                  <div className="message-avatar">
+                    <img src={getBotAvatar(currentUser)} alt="Robot" />
+                  </div>
+                  <div className="message-content">
+                    <div className="typing-indicator">
+                      <span></span>
+                      <span></span>
+                      <span></span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
 
-  <div
-    className="voice-recorder-container"
-    onClick={recording ? stopRecording : startRecording}
-  >
-    <div className={`mic-circle ${recording ? "recording" : ""}`}>
-      <div className="mic-pulse"></div>
-      <i className="fas fa-microphone mic-icon"></i>
-    </div>
+            {/* Input Area */}
+            <div className="chat-input-area">
+              {recording && (
+                <div className="recording-indicator">
+                  <div className="rec-dot"></div>
+                  <span>جارٍ التسجيل...</span>
+                  <canvas id="waveform" className="waveform-mini"></canvas>
+                </div>
+              )}
+              <div className="chat-input-row">
+                <button
+                  className={`voice-btn ${recording ? "recording" : ""}`}
+                  onClick={recording ? stopRecording : startRecording}
+                  disabled={loading}
+                >
+                  <i className="fas fa-microphone"></i>
+                </button>
 
-    <canvas id="waveform" className="waveform"></canvas>
+                <input
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendCommand()}
+                  className="chat-input"
+                  placeholder="اكتب رسالتك هنا..."
+                  disabled={loading || recording}
+                />
 
-    <p className="mic-text">
-      {recording ? "جارٍ التسجيل..." : "اضغط وتحدث"}
-    </p>
-  </div>
-
-  {voiceLoading && <p className="loading-text">⏳ جارٍ معالجة الصوت...</p>}
-</div>
-
-
-          {/* RESULT CARD */}
-          <div className="absher-card card-animate">
-            <h2 className="card-title">📌 النتيجة الأخيرة</h2>
-            {lastVisual ? (
-              <div
-                className="absher-result"
-                dangerouslySetInnerHTML={{ __html: lastVisual.replace(/\n/g, "<br/>") }}
-              />
-            ) : (
-              <p className="card-desc">لم يتم تنفيذ أي أمر بعد.</p>
-            )}
+                <button
+                  className="send-btn"
+                  onClick={sendCommand}
+                  disabled={loading || !text.trim() || recording}
+                >
+                  <i className="fas fa-paper-plane"></i>
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* REQUESTS CARD */}
