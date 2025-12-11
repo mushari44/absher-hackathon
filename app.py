@@ -95,8 +95,17 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 GPT_MODEL = "gpt-4.1-mini"
 
 
-# whisper_model = whisper.load_model("large-v3")
-whisper_model = whisper.load_model("base")
+import torch
+import whisper
+import os
+
+# Force GPU 1
+# os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+
+# Load Whisper on GPU
+whisper_model = whisper.load_model("large-v3", device="cuda")
+
+print("🔥 Whisper is running on:", torch.cuda.get_device_name(0))# whisper_model = whisper.load_model("base")
 
 
 def detect_intent(user_text: str) -> str:
