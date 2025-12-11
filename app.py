@@ -95,7 +95,8 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 GPT_MODEL = "gpt-4.1-mini"
 
 
-whisper_model = whisper.load_model("large-v3")
+# whisper_model = whisper.load_model("large-v3")
+whisper_model = whisper.load_model("base")
 
 
 def detect_intent(user_text: str) -> str:
@@ -157,9 +158,7 @@ def generate_action_steps(intent: str, user_text: str) -> str:
         print("❌ Steps generation failed:", e)
         return "تعذر جلب خطوات الخدمة حالياً."
 
-# ============================================
-# BUSINESS LOGIC
-# ============================================
+
 
 def create_request(user_key, service_id, status="submitted"):
     req = {
@@ -178,7 +177,7 @@ def normalize(text):
 
 def handle_intent(user_key, intent):
     user = USERS[user_key]
-
+    print(f"➡️ Handling intent '{intent}' for user '{user_key}'")
     if intent == "switch_user":
         if "ahmed" in user_key.lower():
             STATE["current_user_key"] = "Ahmed"
@@ -209,9 +208,22 @@ def handle_intent(user_key, intent):
 
     return "لم أفهم أمرك."
 
-# ============================================
-# API ENDPOINTS
-# ============================================
+def text_to_speech(text: str) -> bytes:
+    """
+    Convert text to speech using OpenAI TTS.
+    Returns audio bytes (MP3 format).
+    """
+    try:
+        response = client.audio.speech.create(
+            model="tts-1",  # Use tts-1 or tts-1-hd
+            voice="alloy",   # voices: alloy, echo, fable, onyx, nova, shimmer
+            input=text,
+            response_format="mp3"
+        )
+        return response.read()
+    except Exception as e:
+        print("❌ TTS Error:", e)
+        return None
 
 @app.get("/api/users")
 def get_users():
@@ -258,48 +270,101 @@ def switch_user(user_key: str = Form(...)):
     return {"current_user": USERS[user_key]}
 
 
+import base64
+
 @app.post("/api/voice")
 async def process_voice(file: UploadFile = File(...)):
-    audio_bytes = await file.read()
+    webm_path = None
+    wav_path = None
 
-    # Temporary files
-    temp_dir = tempfile.gettempdir()
-    webm_path = os.path.join(temp_dir, f"{uuid.uuid4()}.webm")
-    wav_path = os.path.join(temp_dir, f"{uuid.uuid4()}.wav")
+    try:
+        audio_bytes = await file.read()
 
-    with open(webm_path, "wb") as f:
-        f.write(audio_bytes)
+        # Temporary paths
+        temp_dir = tempfile.gettempdir()
+        webm_path = os.path.join(temp_dir, f"{uuid.uuid4()}.webm")
+        wav_path = os.path.join(temp_dir, f"{uuid.uuid4()}.wav")
 
-    cmd = [
-        "ffmpeg", "-y",
-        "-i", webm_path,
-        "-ar", "16000",
-        "-ac", "1",
-        "-c:a", "pcm_s16le",
-        wav_path
-    ]
-    subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        # Save uploaded audio
+        with open(webm_path, "wb") as f:
+            f.write(audio_bytes)
 
-    result = whisper_model.transcribe(wav_path, language="ar", fp16=False)
-    text = normalize(result["text"])
+        # Convert to wav (whisper requirement)
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", webm_path,
+            "-ar", "16000",
+            "-ac", "1",
+            "-c:a", "pcm_s16le",
+            wav_path
+        ]
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-    os.remove(webm_path)
-    os.remove(wav_path)
+        # Check if FFmpeg conversion succeeded
+        if result.returncode != 0:
+            print(f"❌ FFmpeg Error: {result.stderr.decode()}")
+            return {"error": "Audio conversion failed"}
 
-    # detect + execute
-    intent = detect_intent(text)
-    cur = STATE["current_user_key"]
-    visual = handle_intent(cur, intent)
-    steps = generate_action_steps(intent, text)
+        if not os.path.exists(wav_path):
+            print("❌ WAV file not created")
+            return {"error": "Audio conversion failed"}
 
-    return {
-        "text": text,
-        "intent": intent,
-        "current_user": USERS[cur],
-        "visual": visual,
-        "action_steps": steps,
-        "recent_requests": STATE["recent_requests"]
-    }
+        # Whisper STT
+        try:
+            transcription_result = whisper_model.transcribe(wav_path, language="ar", fp16=False)
+            text = normalize(transcription_result["text"])
+        except Exception as e:
+            print(f"❌ Whisper Error: {e}")
+            return {"error": "Speech transcription failed"}
+
+        # Intent → Action
+        intent = detect_intent(text)
+        cur = STATE["current_user_key"]
+        visual = handle_intent(cur, intent)
+        steps = generate_action_steps(intent, text)
+
+        # Create the full reply for the user
+        final_text = f"{visual}\n\nالخطوات:\n{steps}"
+
+        # Convert text → speech
+        audio_output = text_to_speech(final_text)
+
+        if audio_output is None:
+            return {"error": "TTS failed"}
+
+        # Encode audio as base64 to include in JSON response
+        audio_base64 = base64.b64encode(audio_output).decode('utf-8')
+
+        # Return JSON response with text data AND audio
+        STATE["last_visual"] = visual
+        return {
+            "intent": intent,
+            "text": text,  # The transcribed text from user's voice
+            "current_user": USERS[cur],
+            "visual": visual,
+            "action_steps": steps,
+            "recent_requests": STATE["recent_requests"],
+            "audio": audio_base64,  # Base64 encoded audio for playback
+            "audio_format": "mp3"
+        }
+
+    except Exception as e:
+        print(f"❌ Voice processing error: {e}")
+        return {"error": f"Voice processing failed: {str(e)}"}
+
+    finally:
+        # Always cleanup temp files
+        if webm_path and os.path.exists(webm_path):
+            try:
+                os.remove(webm_path)
+            except Exception as e:
+                print(f"⚠️ Failed to remove {webm_path}: {e}")
+
+        if wav_path and os.path.exists(wav_path):
+            try:
+                os.remove(wav_path)
+            except Exception as e:
+                print(f"⚠️ Failed to remove {wav_path}: {e}")
 
 # ============================================
 # RUN SERVER

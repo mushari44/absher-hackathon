@@ -12,7 +12,7 @@ import RobotMan from "./assets/robot_man.png";
 import RobotWoman from "./assets/robot_woman.png";
 
 // const API_BASE = "https://twee-televisional-marni.ngrok-free.dev";
-const API_BASE = "https://vulcanisable-pillared-kourtney.ngrok-free.dev";
+const API_BASE = "https://vanilla-optional-tricks-marion.trycloudflare.com";
 export default function App() {
   const [users, setUsers] = useState({});
   const [currentUser, setCurrentUser] = useState(null);
@@ -189,36 +189,58 @@ export default function App() {
   const sendVoice = async (blob) => {
     setLoading(true);
 
-    const formData = new FormData();
-    formData.append("file", blob, "voice.webm");
+    try {
+      const formData = new FormData();
+      formData.append("file", blob, "voice.webm");
 
-    const res = await fetch(`${API_BASE}/api/voice`, {
-      method: "POST",
-      body: formData,
-    });
+      const res = await fetch(`${API_BASE}/api/voice`, {
+        method: "POST",
+        body: formData,
+      });
 
-    const data = await res.json();
-    setCurrentUser(data.current_user);
-    setRecentRequests(data.recent_requests || []);
+      const data = await res.json();
 
-    // Add user voice message
-    const userMessage = { type: "user", text: data.text, isVoice: true };
-    setMessages((prev) => [...prev, userMessage]);
+      // Check for errors
+      if (data.error) {
+        console.error("Voice processing error:", data.error);
+        const errorMessage = {
+          type: "assistant",
+          text: "عذراً، حدث خطأ في معالجة الصوت. الرجاء المحاولة مرة أخرى.",
+        };
+        setMessages((prev) => [...prev, errorMessage]);
+        setLoading(false);
+        return;
+      }
 
-    // Add assistant response with audio
-    const assistantMessage = {
-      type: "assistant",
-      text: data.visual,
-      steps: data.action_steps,
-      intent: data.intent,
-      audio: data.audio, // Base64 encoded audio
-      audioFormat: data.audio_format,
-    };
-    setMessages((prev) => [...prev, assistantMessage]);
+      setCurrentUser(data.current_user);
+      setRecentRequests(data.recent_requests || []);
 
-    // Play audio response automatically
-    if (data.audio) {
-      playAudio(data.audio);
+      // Add user voice message
+      const userMessage = { type: "user", text: data.text, isVoice: true };
+      setMessages((prev) => [...prev, userMessage]);
+
+      // Add assistant response with audio
+      const assistantMessage = {
+        type: "assistant",
+        text: data.visual,
+        steps: data.action_steps,
+        intent: data.intent,
+        audio: data.audio, // Base64 encoded audio
+        audioFormat: data.audio_format,
+      };
+      setMessages((prev) => [...prev, assistantMessage]);
+
+      // Play audio response automatically
+      if (data.audio) {
+        playAudio(data.audio);
+      }
+    } catch (error) {
+      console.error("Error sending voice:", error);
+      const errorMessage = {
+        type: "assistant",
+        text: "عذراً، حدث خطأ في الاتصال. الرجاء التحقق من اتصال الإنترنت.",
+      };
+      setMessages((prev) => [...prev, errorMessage]);
     }
 
     setLoading(false);
