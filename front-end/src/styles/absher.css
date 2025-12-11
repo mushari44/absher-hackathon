@@ -609,6 +609,36 @@ button {
   color: var(--absher-green-dark);
 }
 
+.replay-audio-btn {
+  margin-top: 10px;
+  padding: 8px 14px;
+  background: var(--absher-green);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all var(--transition-fast);
+  font-family: inherit;
+}
+
+.replay-audio-btn:hover {
+  background: var(--absher-green-dark);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(14, 110, 77, 0.25);
+}
+
+.replay-audio-btn:active {
+  transform: translateY(0);
+}
+
+.replay-audio-btn i {
+  font-size: 14px;
+}
+
 /* Typing indicator */
 .typing-indicator {
   display: flex;

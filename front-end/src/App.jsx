@@ -205,16 +205,49 @@ export default function App() {
     const userMessage = { type: "user", text: data.text, isVoice: true };
     setMessages((prev) => [...prev, userMessage]);
 
-    // Add assistant response
+    // Add assistant response with audio
     const assistantMessage = {
       type: "assistant",
       text: data.visual,
       steps: data.action_steps,
       intent: data.intent,
+      audio: data.audio, // Base64 encoded audio
+      audioFormat: data.audio_format,
     };
     setMessages((prev) => [...prev, assistantMessage]);
 
+    // Play audio response automatically
+    if (data.audio) {
+      playAudio(data.audio);
+    }
+
     setLoading(false);
+  };
+
+  // PLAY AUDIO FROM BASE64
+  const playAudio = (base64Audio) => {
+    try {
+      // Convert base64 to blob
+      const byteCharacters = atob(base64Audio);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: "audio/mpeg" });
+      const audioUrl = URL.createObjectURL(blob);
+
+      // Play audio
+      const audio = new Audio(audioUrl);
+      audio.play();
+
+      // Cleanup
+      audio.onended = () => {
+        URL.revokeObjectURL(audioUrl);
+      };
+    } catch (error) {
+      console.error("Error playing audio:", error);
+    }
   };
   const getUserAvatar = (user) => {
     if (!user) return SaudiMan;
@@ -346,6 +379,15 @@ export default function App() {
                             }}
                           />
                         </div>
+                      )}
+                      {msg.audio && (
+                        <button
+                          className="replay-audio-btn"
+                          onClick={() => playAudio(msg.audio)}
+                          title="إعادة تشغيل الصوت"
+                        >
+                          <i className="fas fa-volume-up"></i> إعادة تشغيل الصوت
+                        </button>
                       )}
                     </div>
                   </div>
