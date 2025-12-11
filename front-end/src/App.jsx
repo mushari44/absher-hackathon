@@ -11,8 +11,8 @@ import SaudiWoman from "./assets/saudi_woman.png";
 import RobotMan from "./assets/robot_man.png";
 import RobotWoman from "./assets/robot_woman.png";
 
-// const API_BASE = "https://twee-televisional-marni.ngrok-free.dev";
-const API_BASE = "https://some-leading-delivers-season.trycloudflare.com";
+// API Base URL - Update this for production
+const API_BASE = "http://localhost:8000";
 export default function App() {
   const [users, setUsers] = useState({});
   const [currentUser, setCurrentUser] = useState(null);
@@ -27,6 +27,9 @@ export default function App() {
   const [recording, setRecording] = useState(false);
   const [mediaRecorder, setMediaRecorder] = useState(null);
   const currentAudioRef = useRef(null); // Track currently playing audio
+  const chunksRef = useRef([]); // Use ref to avoid stale closure
+  const streamRef = useRef(null); // Track audio stream for cleanup
+  const animationFrameRef = useRef(null); // Track animation frame for cleanup
 
   // Fetch personalized notification for a user and add to chat
   const fetchNotification = async (userKey) => {
@@ -136,23 +139,86 @@ export default function App() {
     await fetchNotification(key);
   };
 
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      // Stop recording if active
+      if (mediaRecorder && mediaRecorder.state !== "inactive") {
+        mediaRecorder.stop();
+      }
+      // Stop audio stream
+      const stream = streamRef.current;
+      if (stream) {
+        stream.getTracks().forEach((t) => t.stop());
+      }
+      // Stop audio playback
+      const audio = currentAudioRef.current;
+      if (audio) {
+        audio.pause();
+      }
+      // Cancel animation frame
+      const animFrame = animationFrameRef.current;
+      if (animFrame) {
+        cancelAnimationFrame(animFrame);
+      }
+    };
+  }, [mediaRecorder]);
+
   // START VOICE RECORD
   const startRecording = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          sampleRate: 16000
+        }
+      });
+
+      // Store stream for cleanup
+      streamRef.current = stream;
+
+      // Reset chunks array
+      chunksRef.current = [];
 
       // Set recording state first
       setRecording(true);
 
       // Start recorder
-      let localChunks = [];
-      const recorder = new MediaRecorder(stream);
+      const recorder = new MediaRecorder(stream, {
+        mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+          ? 'audio/webm;codecs=opus'
+          : 'audio/webm'
+      });
 
-      recorder.ondataavailable = (e) => localChunks.push(e.data);
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunksRef.current.push(e.data);
+        }
+      };
+
       recorder.onstop = () => {
-        const blob = new Blob(localChunks, { type: "audio/webm" });
+        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+
+        // Validate blob size
+        if (blob.size < 1000) {
+          alert('التسجيل قصير جداً. الرجاء المحاولة مرة أخرى.');
+          return;
+        }
+
         sendVoice(blob);
-        stream.getTracks().forEach((t) => t.stop());
+
+        // Cleanup stream
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach((t) => t.stop());
+          streamRef.current = null;
+        }
+      };
+
+      recorder.onerror = (e) => {
+        console.error('MediaRecorder error:', e);
+        alert('حدث خطأ في التسجيل. الرجاء المحاولة مرة أخرى.');
+        stopRecording();
       };
 
       recorder.start(200);
@@ -171,8 +237,15 @@ export default function App() {
           const ctx = canvas.getContext("2d");
 
           function drawWave() {
-            if (!recorder || recorder.state === "inactive") return;
-            requestAnimationFrame(drawWave);
+            if (!recorder || recorder.state === "inactive") {
+              if (animationFrameRef.current) {
+                cancelAnimationFrame(animationFrameRef.current);
+                animationFrameRef.current = null;
+              }
+              return;
+            }
+
+            animationFrameRef.current = requestAnimationFrame(drawWave);
 
             let dataArray = new Uint8Array(analyser.frequencyBinCount);
             analyser.getByteFrequencyData(dataArray);
@@ -212,6 +285,13 @@ export default function App() {
     if (mediaRecorder && mediaRecorder.state !== "inactive") {
       mediaRecorder.stop();
     }
+
+    // Cancel animation frame
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+
     setRecording(false);
   };
 

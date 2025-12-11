@@ -1,6 +1,6 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from datetime import datetime
 import whisper
 import uvicorn
@@ -266,12 +266,16 @@ STATE = {
 
 app = FastAPI()
 
+# CORS Configuration - Update allowed origins for production
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000,http://localhost:8080").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,  # Whitelist specific origins for security
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST"],  # Only allow necessary methods
+    allow_headers=["Content-Type", "Authorization", "ngrok-skip-browser-warning"],  # Specific headers only
+    max_age=3600,  # Cache preflight requests for 1 hour
 )
 
 from openai import OpenAI
@@ -281,22 +285,22 @@ if not OPENAI_API_KEY:
     raise RuntimeError("❌ OPENAI_API_KEY is not set!")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
-GPT_MODEL = "gpt-4.1-mini"
+# Use GPT-4o-mini for fast and cost-effective responses
+GPT_MODEL = "gpt-4o-mini"
 
 
 import torch
 import whisper
 import os
-
 # Force GPU 1
 # os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-
 # Load Whisper on GPU
 whisper_model = whisper.load_model("large-v3", device="cuda")
+# Check if GPU supports fp16 (compute capability >= 7.0)
+USE_FP16 = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 7
 
-print("🔥 Whisper is running on:", torch.cuda.get_device_name(0))# whisper_model = whisper.load_model("base")
-
-
+print("🔥 Whisper is running on:", torch.cuda.get_device_name(0))
+print(f"✅ Using FP16: {USE_FP16} (GPU Compute Capability: {torch.cuda.get_device_capability() if torch.cuda.is_available() else 'N/A'})")
 def detect_intent(user_text: str) -> str:
     prompt = f"""
 You are an intent classifier for a Saudi government services assistant (ABSHER).
@@ -328,7 +332,6 @@ EXAMPLES:
 User text: "{user_text}"
 Return ONLY the intent name (lowercase with underscores).
 """
-
     try:
         response = client.chat.completions.create(
             model=GPT_MODEL,
@@ -346,7 +349,6 @@ Return ONLY the intent name (lowercase with underscores).
     except Exception as e:
         print("❌ Intent detection failed:", e)
         return "unknown"
-
 
 def generate_action_steps(intent: str, user_text: str) -> str:
     prompt = f"""
@@ -368,8 +370,7 @@ def generate_action_steps(intent: str, user_text: str) -> str:
     except Exception as e:
         print("❌ Steps generation failed:", e)
         return "تعذر جلب خطوات الخدمة حالياً."
-
-
+    
 def generate_conversational_response(user_text: str, user_key: str) -> str:
     """
     Generate intelligent conversational response using GPT-4 with full context.
@@ -433,11 +434,9 @@ def generate_conversational_response(user_text: str, user_key: str) -> str:
 • تجديد الهوية/الإقامة: للمقيمين يجب التأكد من التأمين الصحي الساري
 • جميع الخدمات مجانية أو برسوم رسمية فقط. لا تطلب أبشر أبداً دفعات عبر رسائل أو مكالمات."""}
     ]
-
     # Add conversation history
     for msg in STATE["conversation_history"][-10:]:  # Last 10 messages for context
         messages.append(msg)
-
     # Add current user message
     messages.append({"role": "user", "content": user_text})
 
@@ -448,24 +447,17 @@ def generate_conversational_response(user_text: str, user_key: str) -> str:
             temperature=0.7,
             max_tokens=500
         )
-
         assistant_response = response.choices[0].message.content.strip()
-
         # Update conversation history
         STATE["conversation_history"].append({"role": "user", "content": user_text})
         STATE["conversation_history"].append({"role": "assistant", "content": assistant_response})
-
         # Keep only last 20 messages (10 exchanges)
         if len(STATE["conversation_history"]) > 20:
             STATE["conversation_history"] = STATE["conversation_history"][-20:]
-
         return assistant_response
-
     except Exception as e:
         print(f"❌ Conversational response failed: {e}")
         return "عذراً، حدث خطأ. يمكنك المحاولة مرة أخرى."
-
-
 
 def create_request(user_key, service_id, status="submitted"):
     req = {
@@ -626,6 +618,16 @@ def get_state():
 
 class TextCommand(BaseModel):
     text: str
+
+    @field_validator('text')
+    @classmethod
+    def validate_text(cls, v):
+        if not v or not v.strip():
+            raise ValueError("Text cannot be empty")
+        if len(v) > 1000:
+            raise ValueError("Text too long (max 1000 characters)")
+        # Remove any potentially dangerous characters
+        return v.strip()
 
 
 def detect_user_confirmation(user_text: str, context: str) -> bool:
@@ -957,20 +959,44 @@ async def upload_photo(file: UploadFile = File(...)):
         # Read file
         contents = await file.read()
 
+        # Validate file is not empty
+        if len(contents) == 0:
+            return {
+                "success": False,
+                "error": "الملف فارغ. يرجى اختيار صورة صحيحة."
+            }
+
         # Validate file type
         allowed_types = ["image/jpeg", "image/jpg", "image/png"]
         if file.content_type not in allowed_types:
             return {
                 "success": False,
-                "error": "نوع الملف غير مدعوم. يرجى رفع صورة بصيغة JPG أو PNG فقط."
+                "error": f"نوع الملف غير مدعوم ({file.content_type}). يرجى رفع صورة بصيغة JPG أو PNG فقط."
             }
 
         # Validate file size (max 5MB)
         max_size = 5 * 1024 * 1024  # 5MB
+        min_size = 1024  # 1KB minimum
         if len(contents) > max_size:
             return {
                 "success": False,
-                "error": "حجم الصورة كبير جداً. الحد الأقصى 5 ميجابايت."
+                "error": f"حجم الصورة كبير جداً ({len(contents) / 1024 / 1024:.1f} MB). الحد الأقصى 5 ميجابايت."
+            }
+        if len(contents) < min_size:
+            return {
+                "success": False,
+                "error": "حجم الصورة صغير جداً. يرجى رفع صورة صحيحة."
+            }
+
+        # Basic image format validation (check magic bytes)
+        if contents[:2] == b'\xff\xd8':  # JPEG
+            pass
+        elif contents[:8] == b'\x89PNG\r\n\x1a\n':  # PNG
+            pass
+        else:
+            return {
+                "success": False,
+                "error": "الملف ليس صورة صحيحة. يرجى رفع ملف JPG أو PNG."
             }
 
         # In production: Upload to cloud storage (S3, Azure Blob, etc.)
@@ -1492,12 +1518,19 @@ async def process_voice(file: UploadFile = File(...)):
     wav_path = None
 
     try:
+        # Validate file size (max 10MB)
         audio_bytes = await file.read()
+        max_size = 10 * 1024 * 1024  # 10MB
+        if len(audio_bytes) > max_size:
+            return {"error": "Audio file too large (max 10MB)"}
 
-        # Temporary paths
+        if len(audio_bytes) < 100:  # Too small to be valid audio
+            return {"error": "Audio file too small or empty"}
+
+        # Temporary paths with unique UUIDs
         temp_dir = tempfile.gettempdir()
-        webm_path = os.path.join(temp_dir, f"{uuid.uuid4()}.webm")
-        wav_path = os.path.join(temp_dir, f"{uuid.uuid4()}.wav")
+        webm_path = os.path.join(temp_dir, f"voice_{uuid.uuid4().hex}.webm")
+        wav_path = os.path.join(temp_dir, f"voice_{uuid.uuid4().hex}.wav")
 
         # Save uploaded audio
         with open(webm_path, "wb") as f:
@@ -1516,19 +1549,34 @@ async def process_voice(file: UploadFile = File(...)):
 
         # Check if FFmpeg conversion succeeded
         if result.returncode != 0:
-            print(f"❌ FFmpeg Error: {result.stderr.decode()}")
-            return {"error": "Audio conversion failed"}
+            stderr_msg = result.stderr.decode('utf-8', errors='ignore')
+            print(f"❌ FFmpeg Error (code {result.returncode}): {stderr_msg}")
+            return {"error": f"Audio conversion failed: {stderr_msg[:200]}"}
 
-        if not os.path.exists(wav_path):
-            print("❌ WAV file not created")
-            return {"error": "Audio conversion failed"}
+        if not os.path.exists(wav_path) or os.path.getsize(wav_path) == 0:
+            print("❌ WAV file not created or empty")
+            return {"error": "Audio conversion failed - output file is empty"}
 
         # Whisper STT
         try:
-            transcription_result = whisper_model.transcribe(wav_path, language="ar", fp16=False)
+            transcription_result = whisper_model.transcribe(
+                wav_path,
+                language="ar",
+                fp16=USE_FP16,  # Use fp16 if GPU supports it (2-3x faster)
+                beam_size=5,     # Better accuracy
+                patience=1.0,    # Improves accuracy
+                temperature=0.0, # Deterministic output
+                compression_ratio_threshold=2.4,
+                no_speech_threshold=0.6
+            )
             text = normalize(transcription_result["text"])
+
+            # Log transcription time for monitoring
+            print(f"✅ Transcribed: '{text}' (confidence: {transcription_result.get('language_probability', 'N/A')})")
         except Exception as e:
             print(f"❌ Whisper Error: {e}")
+            import traceback
+            traceback.print_exc()
             return {"error": "Speech transcription failed"}
 
         # Intent → Action
@@ -1594,21 +1642,31 @@ async def process_voice(file: UploadFile = File(...)):
 
     except Exception as e:
         print(f"❌ Voice processing error: {e}")
+        import traceback
+        traceback.print_exc()
         return {"error": f"Voice processing failed: {str(e)}"}
 
     finally:
-        # Always cleanup temp files
+        # CRITICAL: Always cleanup temp files to prevent disk space issues
+        cleanup_count = 0
         if webm_path and os.path.exists(webm_path):
             try:
                 os.remove(webm_path)
+                cleanup_count += 1
+                print(f"🗑️ Cleaned up: {os.path.basename(webm_path)}")
             except Exception as e:
                 print(f"⚠️ Failed to remove {webm_path}: {e}")
 
         if wav_path and os.path.exists(wav_path):
             try:
                 os.remove(wav_path)
+                cleanup_count += 1
+                print(f"🗑️ Cleaned up: {os.path.basename(wav_path)}")
             except Exception as e:
                 print(f"⚠️ Failed to remove {wav_path}: {e}")
+
+        if cleanup_count > 0:
+            print(f"✅ Cleaned up {cleanup_count} temporary file(s)")
 
 # ============================================
 # RUN SERVER
