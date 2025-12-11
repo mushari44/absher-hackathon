@@ -328,6 +328,53 @@ export default function App() {
     return user.gender === "female" ? RobotWoman : RobotMan;
   };
 
+  // UPLOAD PHOTO
+  const uploadPhoto = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    setLoading(true);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await fetch(`${API_BASE}/api/upload-photo`, {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        // Add success message to chat
+        const successMessage = {
+          type: "assistant",
+          text: `${data.message}\n\nاسم الملف: ${data.file_name}\nالحجم: ${(data.file_size / 1024).toFixed(2)} كيلوبايت\nتاريخ الرفع: ${data.upload_date}`,
+        };
+        setMessages((prev) => [...prev, successMessage]);
+      } else {
+        // Add error message to chat
+        const errorMessage = {
+          type: "assistant",
+          text: `❌ ${data.error}`,
+        };
+        setMessages((prev) => [...prev, errorMessage]);
+      }
+    } catch (error) {
+      console.error("Photo upload error:", error);
+      const errorMessage = {
+        type: "assistant",
+        text: "عذراً، حدث خطأ أثناء رفع الصورة. الرجاء المحاولة مرة أخرى.",
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+    }
+
+    setLoading(false);
+    // Reset file input
+    event.target.value = "";
+  };
+
   return (
     <div className="absher-app fade-in">
       {/* ================= HEADER ================= */}
@@ -524,6 +571,17 @@ export default function App() {
                 >
                   <i className="fas fa-microphone"></i>
                 </button>
+
+                <label className="upload-photo-btn" title="رفع صورة شخصية">
+                  <i className="fas fa-camera"></i>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/jpg,image/png"
+                    onChange={uploadPhoto}
+                    style={{ display: "none" }}
+                    disabled={loading}
+                  />
+                </label>
 
                 <input
                   value={text}

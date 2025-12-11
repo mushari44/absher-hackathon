@@ -821,6 +821,32 @@ button {
   cursor: not-allowed;
 }
 
+.upload-photo-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid var(--absher-border);
+  background: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  color: var(--absher-green);
+  font-size: 18px;
+  margin: 0 6px;
+}
+
+.upload-photo-btn:hover {
+  background: var(--absher-light);
+  border-color: var(--absher-green);
+  transform: scale(1.05);
+}
+
+.upload-photo-btn:active {
+  transform: scale(0.98);
+}
+
 .chat-input {
   flex: 1;
   padding: 12px 16px;
