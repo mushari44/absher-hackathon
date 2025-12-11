@@ -7,10 +7,13 @@ import whisper
 import uvicorn
 import io
 import time
+import os
+import subprocess
+import tempfile
+import uuid
+from dotenv import load_dotenv
+load_dotenv()
 
-# ============================================
-# USERS + SYSTEM STATE
-# ============================================
 
 USERS = {
     "Mohamed": {
@@ -22,7 +25,7 @@ USERS = {
         "identity_expiry": (datetime.now().date() + pd.Timedelta(days=400)).strftime("%Y-%m-%d"),
         "license_status": "Valid",
         "violations": 0,
-    },  
+    },
     "Sarah": {
         "user_type": "المواطن",
         "user_id": "1002",
@@ -32,7 +35,7 @@ USERS = {
         "identity_expiry": (datetime.now().date() + pd.Timedelta(days=400)).strftime("%Y-%m-%d"),
         "license_status": "Valid",
         "violations": 0,
-    },  
+    },
     "Ahmed": {
         "user_type": "المقيم",
         "user_id": "1003",
@@ -49,7 +52,6 @@ USERS = {
         "national_id": "3012345678",
         "name": "Alex Smith",
         "gender": "male",
-
         "identity_expiry": (datetime.now().date() + pd.Timedelta(days=100)).strftime("%Y-%m-%d"),
         "license_status": "Valid",
         "violations": 0,
@@ -72,9 +74,9 @@ STATE = {
 }
 
 
+
 app = FastAPI()
 
-# CORS (allow frontend requests)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -83,124 +85,81 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from openai import OpenAI
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
+if not OPENAI_API_KEY:
+    raise RuntimeError("❌ OPENAI_API_KEY is not set!")
 
+client = OpenAI(api_key=OPENAI_API_KEY)
+GPT_MODEL = "gpt-4.1-mini"
 
-import google.generativeai as genai
-import os
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyCJFoBe7oMe3apapQSyqwhOO_HSwQ5DJdE")
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-else:
-    print("⚠️ Warning: GEMINI_API_KEY not set. Please set it as an environment variable.")
-
-gemini_model = genai.GenerativeModel('gemini-2.5-flash')
 
 whisper_model = whisper.load_model("large-v3")
 
-def generate_action_steps(intent: str, user_text: str) -> str:
-    """
-    LLM #2: Takes the intent from LLM #1 and generates the ABSHER steps.
-    Example:
-      intent = "renew_passport"
-      return: "1. افتح منصة أبشر ... 2. اختر خدماتي ... إلخ"
-    """
 
+def detect_intent(user_text: str) -> str:
     prompt = f"""
-أنت مساعد مختص بشرح خطوات تنفيذ خدمات منصة أبشر للمستخدمين.
+You are an intent classifier for a Saudi government services assistant (ABSHER).
+Classify the following user text into ONE intent:
 
-المهمة:
-- لديك نية inferred intent حددها نظام آخر: "{intent}"
-- ولديك النص الأصلي للمستخدم: "{user_text}"
+renew_license
+renew_passport
+appointment
+check_expiry
+renew_id
+switch_user
+greeting
+unknown
 
-أعطِ خطوات واضحة ومختصرة لتنفيذ هذه الخدمة على منصة أبشر.
-اكتب فقط الخطوات بدون أي شرح إضافي.
-
-أمثلة النوايا:
-- renew_id = خطوات تجديد الهوية/الإقامة
-- renew_passport = خطوات تجديد الجواز
-- renew_license = خطوات تجديد رخصة القيادة
-- appointment = خطوات حجز موعد
-- check_expiry = خطوات الاستعلام عن صلاحية الهوية
-
-ابدأ الرد مباشرة بالخطوات.
+User text: "{user_text}"
+Return ONLY the intent name.
 """
 
     try:
-        response = gemini_model.generate_content(prompt)
-        return response.text.strip()
+        response = client.chat.completions.create(
+            model=GPT_MODEL,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        intent = response.choices[0].message.content.strip().lower()
+
+        valid = [
+            "renew_license", "renew_passport", "appointment",
+            "check_expiry", "renew_id", "switch_user",
+            "greeting", "unknown"
+        ]
+
+        return intent if intent in valid else "unknown"
 
     except Exception as e:
-        print(f"Error in LLM Action Generator: {e}")
-        return "تعذر جلب خطوات الخدمة حالياً."
-
-def detect_intent_with_gemini(user_text: str) -> str:
-    """
-    Use Gemini LLM to intelligently detect the intent of the user's query.
-    Returns one of: renew_license, renew_passport, appointment, check_expiry,
-                    renew_id, switch_user, greeting, unknown
-    """
-    prompt = f"""You are an intent classifier for a Saudi Arabian government services system (ABSHER).
-
-Given the user's input text (in Arabic or English), classify it into ONE of these intents:
-
-**Available Intents:**
-1. **renew_license** - User wants to renew their driver's license (رخصة القيادة)
-2. **renew_passport** - User wants to renew their passport (جواز السفر)
-3. **appointment** - User wants to book an appointment (موعد)
-4. **check_expiry** - User wants to check when their ID/residence expires (صلاحية الهوية/الإقامة)
-5. **renew_id** - User wants to renew their national ID or residence permit (الهوية/الإقامة)
-6. **switch_user** - User wants to change the current user/account
-7. **greeting** - User is greeting (hello, hi, مرحبا, etc.)
-8. **unknown** - None of the above intents match
-
-**User Input:** "{user_text}"
-
-**Instructions:**
-- Respond with ONLY the intent name (e.g., "renew_license")
-- Do not include any explanation, just the intent name
-- Be flexible with Arabic dialects and variations
-- Consider context and common phrasings
-
-**Your Response (intent only):**"""
-
-    try:
-        response = gemini_model.generate_content(prompt)
-        print("Gemini response:", response.text)
-        intent = response.text.strip().lower()
-        print("Detected intent:", intent)
-        # Validate the intent is one of the expected values
-        valid_intents = ["renew_license", "renew_passport", "appointment",
-                        "check_expiry", "renew_id", "switch_user", "greeting", "unknown"]
-
-        if intent in valid_intents:
-            return intent
-        else:
-            # If Gemini returns something unexpected, try to map it
-            for valid_intent in valid_intents:
-                if valid_intent in intent:
-                    return valid_intent
-            return "unknown"
-    except Exception as e:
-        print(f"❌ Error calling Gemini API: {e}")
-        # Fallback to basic keyword matching if Gemini fails
-        text_lower = user_text.lower()
-        if any(word in text_lower for word in ["رخصة", "قيادة", "license", "driving"]):
-            return "renew_license"
-        elif any(word in text_lower for word in ["جواز", "passport"]):
-            return "renew_passport"
-        elif any(word in text_lower for word in ["موعد", "appointment", "احجز"]):
-            return "appointment"
-        elif any(word in text_lower for word in ["صلاحية", "expiry", "تنتهي", "باقي"]):
-            return "check_expiry"
-        elif any(word in text_lower for word in ["هوية", "إقامة", "identity", "residence"]):
-            return "renew_id"
-        elif any(word in text_lower for word in ["switch", "change", "غير", "user"]):
-            return "switch_user"
-        elif any(word in text_lower for word in ["مرحبا", "hello", "hi", "السلام"]):
-            return "greeting"
+        print("❌ Intent detection failed:", e)
         return "unknown"
 
+
+def generate_action_steps(intent: str, user_text: str) -> str:
+    prompt = f"""
+أنت مساعد يشرح خطوات تنفيذ خدمات منصة أبشر.
+
+النية: {intent}
+النص: {user_text}
+
+اكتب خطوات تنفيذ الخدمة فقط، مرقمة، بدون أي كلام إضافي.
+"""
+
+    try:
+        response = client.chat.completions.create(
+            model=GPT_MODEL,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return response.choices[0].message.content.strip()
+
+    except Exception as e:
+        print("❌ Steps generation failed:", e)
+        return "تعذر جلب خطوات الخدمة حالياً."
+
+# ============================================
+# BUSINESS LOGIC
+# ============================================
 
 def create_request(user_key, service_id, status="submitted"):
     req = {
@@ -234,8 +193,7 @@ def handle_intent(user_key, intent):
         return f"تم تقديم طلب تجديد الهوية. رقم الطلب {req['request_id']}"
 
     if intent == "check_expiry":
-        expiry = user["identity_expiry"]
-        return f"تنتهي هويتك بتاريخ {expiry}"
+        return f"تنتهي هويتك بتاريخ {user['identity_expiry']}"
 
     if intent == "renew_license":
         if user["violations"] > 0:
@@ -251,7 +209,9 @@ def handle_intent(user_key, intent):
 
     return "لم أفهم أمرك."
 
-
+# ============================================
+# API ENDPOINTS
+# ============================================
 
 @app.get("/api/users")
 def get_users():
@@ -271,16 +231,15 @@ class TextCommand(BaseModel):
 def process_text(cmd: TextCommand):
     text = normalize(cmd.text)
 
-    # 1) LLM #1 — Intent
-    intent = detect_intent_with_gemini(text)
+    # 1) intent with GPT
+    intent = detect_intent(text)
 
-    # 2) Execute the system logic
+    # 2) execute logic
     cur = STATE["current_user_key"]
     visual = handle_intent(cur, intent)
 
-    # 3) LLM #2 — Action Steps
+    # 3) action steps
     steps = generate_action_steps(intent, cmd.text)
-    print("Generated Steps:", steps)
     STATE["last_visual"] = visual
 
     return {
@@ -296,32 +255,21 @@ def process_text(cmd: TextCommand):
 @app.post("/api/switch-user")
 def switch_user(user_key: str = Form(...)):
     STATE["current_user_key"] = user_key
-    return {
-        "current_user": USERS[user_key]
-    }
+    return {"current_user": USERS[user_key]}
 
-
-import subprocess
-import tempfile
-import uuid
-import os
-import tempfile
-import subprocess
 
 @app.post("/api/voice")
 async def process_voice(file: UploadFile = File(...)):
     audio_bytes = await file.read()
 
-    # Create explicit temp paths
+    # Temporary files
     temp_dir = tempfile.gettempdir()
     webm_path = os.path.join(temp_dir, f"{uuid.uuid4()}.webm")
-    wav_path  = os.path.join(temp_dir, f"{uuid.uuid4()}.wav")
+    wav_path = os.path.join(temp_dir, f"{uuid.uuid4()}.wav")
 
-    # Save webm file
     with open(webm_path, "wb") as f:
         f.write(audio_bytes)
 
-    # Convert via ffmpeg
     cmd = [
         "ffmpeg", "-y",
         "-i", webm_path,
@@ -332,20 +280,16 @@ async def process_voice(file: UploadFile = File(...)):
     ]
     subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-    # Whisper STT
     result = whisper_model.transcribe(wav_path, language="ar", fp16=False)
     text = normalize(result["text"])
-    # Clean up temp files
-    print("text:", text)
+
     os.remove(webm_path)
     os.remove(wav_path)
 
-    intent = detect_intent_with_gemini(text)
+    # detect + execute
+    intent = detect_intent(text)
     cur = STATE["current_user_key"]
-
     visual = handle_intent(cur, intent)
-    STATE["last_visual"] = visual
-
     steps = generate_action_steps(intent, text)
 
     return {
@@ -356,7 +300,6 @@ async def process_voice(file: UploadFile = File(...)):
         "action_steps": steps,
         "recent_requests": STATE["recent_requests"]
     }
-
 
 # ============================================
 # RUN SERVER
