@@ -218,14 +218,10 @@ def handle_intent(user_key, intent):
     return "لم أفهم أمرك."
 
 def text_to_speech(text: str) -> bytes:
-    """
-    Convert text to speech using OpenAI TTS.
-    Returns audio bytes (MP3 format).
-    """
     try:
         response = client.audio.speech.create(
-            model="tts-1",  # Use tts-1 or tts-1-hd
-            voice="alloy",   # voices: alloy, echo, fable, onyx, nova, shimmer
+            model="tts-1-hd",     # higher quality
+            voice="onyx",         # deep male voice
             input=text,
             response_format="mp3"
         )
@@ -233,6 +229,7 @@ def text_to_speech(text: str) -> bytes:
     except Exception as e:
         print("❌ TTS Error:", e)
         return None
+
 
 @app.get("/api/users")
 def get_users():
