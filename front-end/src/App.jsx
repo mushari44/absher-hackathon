@@ -1,5 +1,5 @@
 // src/App.jsx
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import "./styles/absher.css";
 
 // Logos
@@ -26,6 +26,7 @@ export default function App() {
 
   const [recording, setRecording] = useState(false);
   const [mediaRecorder, setMediaRecorder] = useState(null);
+  const currentAudioRef = useRef(null); // Track currently playing audio
 
   useEffect(() => {
     const load = async () => {
@@ -249,6 +250,12 @@ export default function App() {
   // PLAY AUDIO FROM BASE64
   const playAudio = (base64Audio) => {
     try {
+      // Stop any currently playing audio
+      if (currentAudioRef.current) {
+        currentAudioRef.current.pause();
+        currentAudioRef.current.currentTime = 0;
+      }
+
       // Convert base64 to blob
       const byteCharacters = atob(base64Audio);
       const byteNumbers = new Array(byteCharacters.length);
@@ -259,13 +266,24 @@ export default function App() {
       const blob = new Blob([byteArray], { type: "audio/mpeg" });
       const audioUrl = URL.createObjectURL(blob);
 
-      // Play audio
+      // Create and play new audio
       const audio = new Audio(audioUrl);
-      audio.play();
+      currentAudioRef.current = audio; // Track the current audio
 
-      // Cleanup
+      audio.play().catch(err => {
+        console.error("Audio playback failed:", err);
+      });
+
+      // Cleanup when audio ends
       audio.onended = () => {
         URL.revokeObjectURL(audioUrl);
+        currentAudioRef.current = null;
+      };
+
+      // Cleanup if audio errors
+      audio.onerror = () => {
+        URL.revokeObjectURL(audioUrl);
+        currentAudioRef.current = null;
       };
     } catch (error) {
       console.error("Error playing audio:", error);
