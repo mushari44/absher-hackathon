@@ -11,8 +11,8 @@ import SaudiWoman from "./assets/saudi_woman.png";
 import RobotMan from "./assets/robot_man.png";
 import RobotWoman from "./assets/robot_woman.png";
 
-const API_BASE = "https://twee-televisional-marni.ngrok-free.dev";
-
+// const API_BASE = "https://twee-televisional-marni.ngrok-free.dev";
+const API_BASE = "https://vulcanisable-pillared-kourtney.ngrok-free.dev ";
 export default function App() {
   const [users, setUsers] = useState({});
   const [currentUser, setCurrentUser] = useState(null);
@@ -27,39 +27,38 @@ export default function App() {
   const [recording, setRecording] = useState(false);
   const [mediaRecorder, setMediaRecorder] = useState(null);
 
-useEffect(() => {
-  const load = async () => {
-    try {
-      const usersRes = await fetch(`${API_BASE}/api/users`, {
-        headers: {
-          "ngrok-skip-browser-warning": "true"
-        }
-      });
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const usersRes = await fetch(`${API_BASE}/api/users`, {
+          headers: {
+            "ngrok-skip-browser-warning": "true",
+          },
+        });
 
-      const usersData = await usersRes.json();
-      console.log("usersData:", usersData);
+        const usersData = await usersRes.json();
+        console.log("usersData:", usersData);
 
-      const stateRes = await fetch(`${API_BASE}/api/state`, {
-        headers: {
-          "ngrok-skip-browser-warning": "true"
-        }
-      });
+        const stateRes = await fetch(`${API_BASE}/api/state`, {
+          headers: {
+            "ngrok-skip-browser-warning": "true",
+          },
+        });
 
-      const stateData = await stateRes.json();
-      console.log("stateData:", stateData);
+        const stateData = await stateRes.json();
+        console.log("stateData:", stateData);
 
-      setUsers(usersData);
-      setCurrentUser(usersData[stateData.current_user_key]);
-      setCurrentUserKey(stateData.current_user_key);
-      setRecentRequests(stateData.recent_requests || []);
+        setUsers(usersData);
+        setCurrentUser(usersData[stateData.current_user_key]);
+        setCurrentUserKey(stateData.current_user_key);
+        setRecentRequests(stateData.recent_requests || []);
+      } catch (err) {
+        console.error("LOAD ERROR:", err);
+      }
+    };
 
-    } catch (err) {
-      console.error("LOAD ERROR:", err);
-    }
-  };
-
-  load();
-}, []);
+    load();
+  }, []);
 
   // SEND TEXT COMMAND
   const sendCommand = async () => {
@@ -119,11 +118,11 @@ useEffect(() => {
       let localChunks = [];
       const recorder = new MediaRecorder(stream);
 
-      recorder.ondataavailable = e => localChunks.push(e.data);
+      recorder.ondataavailable = (e) => localChunks.push(e.data);
       recorder.onstop = () => {
         const blob = new Blob(localChunks, { type: "audio/webm" });
         sendVoice(blob);
-        stream.getTracks().forEach(t => t.stop());
+        stream.getTracks().forEach((t) => t.stop());
       };
 
       recorder.start(200);
@@ -160,7 +159,7 @@ useEffect(() => {
 
             for (let i = 0; i < dataArray.length; i++) {
               let v = dataArray[i] / 255.0;
-              let y = (canvas.height / 2) - (v * 15);
+              let y = canvas.height / 2 - v * 15;
 
               i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
               x += sliceWidth;
@@ -177,7 +176,6 @@ useEffect(() => {
       alert("تعذر الوصول إلى الميكروفون. يرجى السماح بالوصول للميكروفون.");
     }
   };
-
 
   // STOP RECORD
   const stopRecording = () => {
@@ -218,19 +216,18 @@ useEffect(() => {
 
     setLoading(false);
   };
-const getUserAvatar = (user) => {
-  if (!user) return SaudiMan;
-  return user.gender === "female" ? SaudiWoman : SaudiMan;
-};
+  const getUserAvatar = (user) => {
+    if (!user) return SaudiMan;
+    return user.gender === "female" ? SaudiWoman : SaudiMan;
+  };
 
-const getBotAvatar = (user) => {
-  if (!user) return RobotMan;
-  return user.gender === "female" ? RobotWoman : RobotMan;
-};
+  const getBotAvatar = (user) => {
+    if (!user) return RobotMan;
+    return user.gender === "female" ? RobotWoman : RobotMan;
+  };
 
   return (
     <div className="absher-app fade-in">
-
       {/* ================= HEADER ================= */}
       <header className="absher-header">
         <img src={MoiLogo} className="gov-logo" alt="MOI" />
@@ -243,7 +240,6 @@ const getBotAvatar = (user) => {
 
       {/* ================= MAIN LAYOUT ================= */}
       <div className="absher-layout">
-
         {/* ============== SIDEBAR ============== */}
         <aside className="absher-sidebar absher-shadow slide-right">
           <h3 className="sidebar-title">اختر المستخدم</h3>
@@ -254,22 +250,22 @@ const getBotAvatar = (user) => {
                 key={key}
                 onClick={() => switchUser(key)}
                 className={
-                  "sidebar-user-btn " +
-                  (currentUserKey === key ? "active" : "")
+                  "sidebar-user-btn " + (currentUserKey === key ? "active" : "")
                 }
               >
-<div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-  <img
-    src={getUserAvatar(user)}
-    alt="avatar"
-    className="sidebar-user-avatar"
-  />
-  <div>
-    <div className="name">{user.name}</div>
-    <div className="type">{user.user_type}</div>
-  </div>
-</div>
-
+                <div
+                  style={{ display: "flex", alignItems: "center", gap: "12px" }}
+                >
+                  <img
+                    src={getUserAvatar(user)}
+                    alt="avatar"
+                    className="sidebar-user-avatar"
+                  />
+                  <div>
+                    <div className="name">{user.name}</div>
+                    <div className="type">{user.user_type}</div>
+                  </div>
+                </div>
               </button>
             ))}
           </div>
@@ -286,7 +282,6 @@ const getBotAvatar = (user) => {
 
         {/* ============== MAIN CONTENT ============== */}
         <main className="absher-main">
-
           {/* CHAT INTERFACE - ChatGPT Style */}
           <div className="chat-container card-animate">
             <div className="chat-header">
@@ -299,17 +294,30 @@ const getBotAvatar = (user) => {
               {messages.length === 0 ? (
                 <div className="chat-empty">
                   <div className="empty-icon">
-                    <img src={getBotAvatar(currentUser)} alt="Robot" className="empty-robot" />
+                    <img
+                      src={getBotAvatar(currentUser)}
+                      alt="Robot"
+                      className="empty-robot"
+                    />
                   </div>
                   <p>مرحباً! كيف يمكنني مساعدتك اليوم؟</p>
                   <div className="suggestions">
-                    <button onClick={() => setText("جدد رخصتي")} className="suggestion-btn">
+                    <button
+                      onClick={() => setText("جدد رخصتي")}
+                      className="suggestion-btn"
+                    >
                       جدد رخصتي
                     </button>
-                    <button onClick={() => setText("كم باقي على الإقامة؟")} className="suggestion-btn">
+                    <button
+                      onClick={() => setText("كم باقي على الإقامة؟")}
+                      className="suggestion-btn"
+                    >
                       كم باقي على الإقامة؟
                     </button>
-                    <button onClick={() => setText("أبغى موعد جوازات")} className="suggestion-btn">
+                    <button
+                      onClick={() => setText("أبغى موعد جوازات")}
+                      className="suggestion-btn"
+                    >
                       أبغى موعد جوازات
                     </button>
                   </div>
@@ -325,12 +333,18 @@ const getBotAvatar = (user) => {
                       )}
                     </div>
                     <div className="message-content">
-                      {msg.isVoice && <span className="voice-badge">🎤 صوتي</span>}
+                      {msg.isVoice && (
+                        <span className="voice-badge">🎤 صوتي</span>
+                      )}
                       <div className="message-text">{msg.text}</div>
                       {msg.steps && (
                         <div className="message-steps">
                           <strong>📋 خطوات التنفيذ:</strong>
-                          <div dangerouslySetInnerHTML={{ __html: msg.steps.replace(/\n/g, "<br/>") }} />
+                          <div
+                            dangerouslySetInnerHTML={{
+                              __html: msg.steps.replace(/\n/g, "<br/>"),
+                            }}
+                          />
                         </div>
                       )}
                     </div>
@@ -374,7 +388,9 @@ const getBotAvatar = (user) => {
                 <input
                   value={text}
                   onChange={(e) => setText(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendCommand()}
+                  onKeyDown={(e) =>
+                    e.key === "Enter" && !e.shiftKey && sendCommand()
+                  }
                   className="chat-input"
                   placeholder="اكتب رسالتك هنا..."
                   disabled={loading || recording}
@@ -411,7 +427,6 @@ const getBotAvatar = (user) => {
               <p className="card-desc">لا توجد طلبات حتى الآن.</p>
             )}
           </div>
-
         </main>
       </div>
     </div>
