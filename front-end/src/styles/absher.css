@@ -111,6 +111,68 @@ button {
 }
 
 /* ==========================
+   NOTIFICATION BANNER
+========================== */
+
+.notification-banner {
+  background: linear-gradient(135deg, #0A8754 0%, #0E6E4D 100%);
+  padding: 16px 26px;
+  box-shadow: 0 4px 12px rgba(14, 110, 77, 0.15);
+  animation: slideDown 0.4s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.notification-content {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.notification-text {
+  color: white;
+  font-size: 15px;
+  line-height: 1.6;
+  flex: 1;
+  white-space: pre-line;
+}
+
+.notification-close {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: white;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 24px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  font-weight: 300;
+}
+
+.notification-close:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: rotate(90deg);
+}
+
+/* ==========================
    LAYOUT
 ========================== */
 
@@ -495,6 +557,20 @@ button {
   justify-content: center;
 }
 
+.suggestions-inline {
+  padding: 20px;
+  margin-top: 16px;
+  text-align: center;
+  animation: fadeIn 0.5s ease;
+}
+
+.suggestions-title {
+  color: var(--absher-green-dark);
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
 .suggestion-btn {
   background: var(--absher-light);
   border: 1px solid var(--absher-border);
@@ -834,6 +910,21 @@ button {
 
   .absher-center-header h2 {
     font-size: 14px;
+  }
+
+  /* Notification responsive */
+  .notification-banner {
+    padding: 12px 16px;
+  }
+
+  .notification-text {
+    font-size: 13px;
+  }
+
+  .notification-close {
+    width: 28px;
+    height: 28px;
+    font-size: 20px;
   }
 
   /* Layout becomes vertical on mobile */

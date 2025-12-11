@@ -28,6 +28,29 @@ export default function App() {
   const [mediaRecorder, setMediaRecorder] = useState(null);
   const currentAudioRef = useRef(null); // Track currently playing audio
 
+  // Fetch personalized notification for a user and add to chat
+  const fetchNotification = async (userKey) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/notification/${userKey}`, {
+        headers: {
+          "ngrok-skip-browser-warning": "true",
+        },
+      });
+      const data = await res.json();
+      if (!data.error) {
+        // Add notification as first assistant message in chat
+        const welcomeMessage = {
+          type: "assistant",
+          text: data.notification,
+          isWelcome: true,  // Flag to identify welcome messages
+        };
+        setMessages([welcomeMessage]);  // Replace messages with welcome
+      }
+    } catch (err) {
+      console.error("Notification fetch error:", err);
+    }
+  };
+
   useEffect(() => {
     const load = async () => {
       try {
@@ -53,6 +76,9 @@ export default function App() {
         setCurrentUser(usersData[stateData.current_user_key]);
         setCurrentUserKey(stateData.current_user_key);
         setRecentRequests(stateData.recent_requests || []);
+
+        // Fetch personalized notification for initial user
+        await fetchNotification(stateData.current_user_key);
       } catch (err) {
         console.error("LOAD ERROR:", err);
       }
@@ -105,6 +131,9 @@ export default function App() {
     const data = await res.json();
     setCurrentUser(data.current_user);
     setCurrentUserKey(key);
+
+    // Fetch personalized notification for new user
+    await fetchNotification(key);
   };
 
   // START VOICE RECORD
@@ -396,42 +425,71 @@ export default function App() {
                   </div>
                 </div>
               ) : (
-                messages.map((msg, idx) => (
-                  <div key={idx} className={`chat-message ${msg.type}`}>
-                    <div className="message-avatar">
-                      {msg.type === "user" ? (
-                        <img src={getUserAvatar(currentUser)} alt="User" />
-                      ) : (
-                        <img src={getBotAvatar(currentUser)} alt="Robot" />
-                      )}
+                <>
+                  {messages.map((msg, idx) => (
+                    <div key={idx} className={`chat-message ${msg.type}`}>
+                      <div className="message-avatar">
+                        {msg.type === "user" ? (
+                          <img src={getUserAvatar(currentUser)} alt="User" />
+                        ) : (
+                          <img src={getBotAvatar(currentUser)} alt="Robot" />
+                        )}
+                      </div>
+                      <div className="message-content">
+                        {msg.isVoice && (
+                          <span className="voice-badge">🎤 صوتي</span>
+                        )}
+                        <div className="message-text">{msg.text}</div>
+                        {msg.steps && (
+                          <div className="message-steps">
+                            <strong>📋 خطوات التنفيذ:</strong>
+                            <div
+                              dangerouslySetInnerHTML={{
+                                __html: msg.steps.replace(/\n/g, "<br/>"),
+                              }}
+                            />
+                          </div>
+                        )}
+                        {msg.audio && (
+                          <button
+                            className="replay-audio-btn"
+                            onClick={() => playAudio(msg.audio)}
+                            title="إعادة تشغيل الصوت"
+                          >
+                            <i className="fas fa-volume-up"></i> إعادة تشغيل الصوت
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <div className="message-content">
-                      {msg.isVoice && (
-                        <span className="voice-badge">🎤 صوتي</span>
-                      )}
-                      <div className="message-text">{msg.text}</div>
-                      {msg.steps && (
-                        <div className="message-steps">
-                          <strong>📋 خطوات التنفيذ:</strong>
-                          <div
-                            dangerouslySetInnerHTML={{
-                              __html: msg.steps.replace(/\n/g, "<br/>"),
-                            }}
-                          />
-                        </div>
-                      )}
-                      {msg.audio && (
+                  ))}
+
+                  {/* Show suggestions after welcome message */}
+                  {messages.length === 1 && messages[0].isWelcome && (
+                    <div className="suggestions-inline">
+                      <p className="suggestions-title">جرّب الأوامر التالية:</p>
+                      <div className="suggestions">
                         <button
-                          className="replay-audio-btn"
-                          onClick={() => playAudio(msg.audio)}
-                          title="إعادة تشغيل الصوت"
+                          onClick={() => setText("جدد رخصتي")}
+                          className="suggestion-btn"
                         >
-                          <i className="fas fa-volume-up"></i> إعادة تشغيل الصوت
+                          جدد رخصتي
                         </button>
-                      )}
+                        <button
+                          onClick={() => setText("كم باقي على الإقامة؟")}
+                          className="suggestion-btn"
+                        >
+                          كم باقي على الإقامة؟
+                        </button>
+                        <button
+                          onClick={() => setText("أبغى موعد جوازات")}
+                          className="suggestion-btn"
+                        >
+                          أبغى موعد جوازات
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  )}
+                </>
               )}
               {loading && (
                 <div className="chat-message assistant">

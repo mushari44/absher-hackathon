@@ -276,6 +276,71 @@ def switch_user(user_key: str = Form(...)):
     return {"current_user": USERS[user_key]}
 
 
+def generate_welcome_notification(user_key: str) -> str:
+    """
+    Generate personalized welcome notification using GPT based on user info.
+    Highlights important alerts (expiring documents, violations, etc.)
+    """
+    user = USERS[user_key]
+
+    # Calculate days until expiry
+    from datetime import datetime
+    expiry_date = datetime.strptime(user["identity_expiry"], "%Y-%m-%d")
+    today = datetime.now()
+    days_until_expiry = (expiry_date - today).days
+
+    prompt = f"""
+أنت مساعد ذكي لمنصة أبشر. قم بإنشاء رسالة ترحيب شخصية للمستخدم التالي:
+
+معلومات المستخدم:
+- الاسم: {user['name']}
+- النوع: {user['user_type']}
+- رقم الهوية: {user['national_id']}
+- تاريخ انتهاء الهوية/الإقامة: {user['identity_expiry']} (متبقي {days_until_expiry} يوم)
+- حالة رخصة القيادة: {user['license_status']}
+- المخالفات المرورية: {user['violations']} ريال
+
+تعليمات:
+1. ابدأ بترحيب شخصي باسم المستخدم
+2. إذا كان هناك مشاكل عاجلة (هوية تنتهي قريباً، مخالفات، رخصة منتهية)، نبّه عليها بوضوح
+3. اذكر الإيجابيات إن وجدت (كل شيء صالح، لا مخالفات)
+4. كن موجزاً ومباشراً (2-4 جمل فقط)
+5. استخدم أيقونات مناسبة (✅ ⚠️ ❌ 📅 🚗)
+
+مثال للتنبيهات:
+- إذا كانت الهوية تنتهي خلال 30 يوم: تنبيه عاجل
+- إذا كانت المخالفات أكثر من 0: تنبيه بضرورة السداد
+- إذا كانت الرخصة "Expired Medical": تنبيه بتجديد الفحص الطبي
+
+اكتب الرسالة فقط بدون أي شرح إضافي:
+"""
+
+    try:
+        response = client.chat.completions.create(
+            model=GPT_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"❌ Welcome notification generation failed: {e}")
+        return f"مرحباً {user['name']}! 👋"
+
+
+@app.get("/api/notification/{user_key}")
+def get_user_notification(user_key: str):
+    """Get personalized notification for a user"""
+    if user_key not in USERS:
+        return {"error": "User not found"}
+
+    notification = generate_welcome_notification(user_key)
+    return {
+        "user_key": user_key,
+        "notification": notification,
+        "user": USERS[user_key]
+    }
+
+
 import base64
 
 @app.post("/api/voice")
