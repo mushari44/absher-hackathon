@@ -12,7 +12,7 @@ import RobotMan from "./assets/robot_man.png";
 import RobotWoman from "./assets/robot_woman.png";
 
 // const API_BASE = "https://twee-televisional-marni.ngrok-free.dev";
-const API_BASE = "https://vulcanisable-pillared-kourtney.ngrok-free.dev ";
+const API_BASE = "https://vulcanisable-pillared-kourtney.ngrok-free.dev";
 export default function App() {
   const [users, setUsers] = useState({});
   const [currentUser, setCurrentUser] = useState(null);
