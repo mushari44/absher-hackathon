@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>بوابة الدفع - أبشر</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0a8754 0%, #065a36 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .payment-container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            max-width: 500px;
+            width: 100%;
+            overflow: hidden;
+        }
+
+        .payment-header {
+            background: linear-gradient(135deg, #0a8754 0%, #065a36 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .payment-header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .payment-header .logo {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+
+        .payment-body {
+            padding: 30px;
+        }
+
+        .payment-info {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 25px;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .info-row:last-child {
+            border-bottom: none;
+        }
+
+        .info-label {
+            color: #6c757d;
+            font-size: 14px;
+        }
+
+        .info-value {
+            color: #212529;
+            font-weight: 600;
+            font-size: 16px;
+        }
+
+        .amount-display {
+            background: linear-gradient(135deg, #0a8754 0%, #065a36 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            margin-bottom: 25px;
+        }
+
+        .amount-label {
+            font-size: 14px;
+            opacity: 0.9;
+            margin-bottom: 5px;
+        }
+
+        .amount-value {
+            font-size: 36px;
+            font-weight: bold;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-label {
+            display: block;
+            color: #495057;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: #0a8754;
+        }
+
+        .payment-button {
+            width: 100%;
+            padding: 16px;
+            background: linear-gradient(135deg, #0a8754 0%, #065a36 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .payment-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(10, 135, 84, 0.3);
+        }
+
+        .payment-button:active {
+            transform: translateY(0);
+        }
+
+        .payment-button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .security-note {
+            text-align: center;
+            color: #6c757d;
+            font-size: 12px;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #dee2e6;
+        }
+
+        .security-icon {
+            color: #0a8754;
+            margin-left: 5px;
+        }
+
+        .success-message {
+            display: none;
+            text-align: center;
+            padding: 40px;
+        }
+
+        .success-message.show {
+            display: block;
+        }
+
+        .success-icon {
+            font-size: 72px;
+            color: #0a8754;
+            margin-bottom: 20px;
+        }
+
+        .success-title {
+            font-size: 24px;
+            color: #212529;
+            margin-bottom: 10px;
+        }
+
+        .success-text {
+            color: #6c757d;
+            font-size: 16px;
+            margin-bottom: 20px;
+        }
+
+        .receipt-id {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: monospace;
+            color: #495057;
+            margin-bottom: 20px;
+        }
+
+        .close-button {
+            padding: 12px 30px;
+            background: #0a8754;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+        }
+    </style>
+</head>
+<body>
+    <div class="payment-container">
+        <div class="payment-header">
+            <div class="logo">🏛️</div>
+            <h1>بوابة الدفع الآمن</h1>
+            <p>منصة أبشر الرقمية</p>
+        </div>
+
+        <div class="payment-body" id="paymentForm">
+            <div class="payment-info">
+                <div class="info-row">
+                    <span class="info-label">نوع الخدمة:</span>
+                    <span class="info-value" id="serviceName">سداد مخالفات مرورية</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">رقم الطلب:</span>
+                    <span class="info-value" id="requestId">-</span>
+                </div>
+            </div>
+
+            <div class="amount-display">
+                <div class="amount-label">المبلغ المطلوب</div>
+                <div class="amount-value"><span id="amountValue">0</span> ریال</div>
+            </div>
+
+            <div class="demo-notice" style="background: #fff3cd; border: 2px solid #ffc107; border-radius: 8px; padding: 15px; margin-bottom: 20px; text-align: center;">
+                <strong>🎯 وضع التجربة</strong>
+                <p style="margin: 10px 0 0 0; font-size: 14px; color: #856404;">
+                    اضغط على زر "تأكيد الدفع" لإتمام العملية فوراً (لا حاجة لبيانات البطاقة)
+                </p>
+            </div>
+
+            <button type="button" class="payment-button" id="payButton" onclick="handlePayment()">
+                💳 تأكيد الدفع
+            </button>
+
+            <div class="security-note">
+                <span class="security-icon">🔒</span>
+                معاملة آمنة ومحمية بتقنية التشفير
+            </div>
+        </div>
+
+        <div class="success-message" id="successMessage">
+            <div class="success-icon">✅</div>
+            <h2 class="success-title">تم الدفع بنجاح!</h2>
+            <p class="success-text">تم سداد المبلغ وتحديث طلبك</p>
+            <div class="receipt-id">
+                رقم الإيصال: <span id="receiptId">-</span>
+            </div>
+            <a href="#" class="close-button" onclick="closeWindow()">العودة لأبشر</a>
+        </div>
+    </div>
+
+    <script>
+        // Get URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const requestId = urlParams.get('request_id') || '-';
+        const amount = urlParams.get('amount') || '0';
+        const userId = urlParams.get('user') || 'Ahmed';
+        const service = urlParams.get('service') || 'DRIVER_LICENSE_RENEWAL';
+
+        // Display payment info
+        document.getElementById('requestId').textContent = requestId;
+        document.getElementById('amountValue').textContent = amount;
+
+        // Handle payment submission - One-click demo payment
+        async function handlePayment() {
+            const payButton = document.getElementById('payButton');
+            payButton.disabled = true;
+            payButton.textContent = '⏳ جاري المعالجة...';
+
+            // Simulate processing delay
+            await new Promise(resolve => setTimeout(resolve, 1500));
+
+            try {
+                // Call backend payment API
+                const response = await fetch('http://localhost:8000/api/payment', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        user_id: userId,
+                        amount: parseFloat(amount),
+                        service: service
+                    })
+                });
+
+                const result = await response.json();
+                console.log('🔷 Payment API Response:', result);
+
+                if (result.success) {
+                    // Show success message
+                    document.getElementById('receiptId').textContent = result.receipt_id;
+                    document.getElementById('paymentForm').style.display = 'none';
+                    document.getElementById('successMessage').classList.add('show');
+
+                    // Notify parent window
+                    console.log('🔷 window.opener exists?', !!window.opener);
+                    if (window.opener) {
+                        const messageData = {
+                            type: 'PAYMENT_SUCCESS',
+                            receiptId: result.receipt_id,
+                            message: result.message,
+                            service: service  // Pass service type to parent
+                        };
+                        console.log('🔷 Sending postMessage to parent:', messageData);
+                        window.opener.postMessage(messageData, '*');
+                        console.log('🔷 postMessage sent successfully');
+                    } else {
+                        console.error('❌ window.opener is null - cannot send message to parent');
+                    }
+                } else {
+                    alert('حدث خطأ في عملية الدفع. يرجى المحاولة مرة أخرى.');
+                    payButton.disabled = false;
+                    payButton.textContent = '💳 تأكيد الدفع';
+                }
+            } catch (error) {
+                console.error('Payment error:', error);
+                alert('حدث خطأ في الاتصال. يرجى المحاولة مرة أخرى.');
+                payButton.disabled = false;
+                payButton.textContent = '💳 تأكيد الدفع';
+            }
+        }
+
+        function closeWindow() {
+            if (window.opener) {
+                window.close();
+            } else {
+                window.location.href = 'http://localhost:5173';
+            }
+        }
+    </script>
+</body>
+</html>

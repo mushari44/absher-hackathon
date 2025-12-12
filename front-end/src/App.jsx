@@ -13,10 +13,40 @@ import RobotWoman from "./assets/robot_woman.png";
 
 // API Base URL - Update this for production
 const API_BASE = "http://localhost:8000";
+
+// Helper function to format markdown-like text to HTML
+const formatMessageText = (text) => {
+  if (!text) return "";
+
+  return text
+    // Bold: **text** -> <strong>text</strong>
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    // Action buttons: [text|ACTION:data] -> clickable button with data attribute
+    .replace(/\[(.+?)\|(CONFIRM_TRANSFER|CANCEL):(.+?)\]/g, (match, buttonText, action, data) => {
+      if (action === "CONFIRM_TRANSFER") {
+        return `<button class="confirm-action-button" data-action="${action}" data-params="${data}" style="display: inline-block; background: linear-gradient(135deg, #0a8754 0%, #065a36 100%); color: white; padding: 12px 24px; border-radius: 8px; border: none; margin: 10px 5px; font-weight: bold; box-shadow: 0 2px 8px rgba(10, 135, 84, 0.3); cursor: pointer;">${buttonText}</button>`;
+      } else if (action === "CANCEL") {
+        return `<button class="cancel-action-button" data-action="${action}" style="display: inline-block; background: linear-gradient(135deg, #dc3545 0%, #bd2130 100%); color: white; padding: 12px 24px; border-radius: 8px; border: none; margin: 10px 5px; font-weight: bold; box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3); cursor: pointer;">${buttonText}</button>`;
+      }
+      return match;
+    })
+    // Payment links: [text|url] -> clickable button that opens popup
+    .replace(/\[(.+?)\|(.+?)\]/g, '<button onclick="window.open(\'$2\', \'payment\', \'width=600,height=800,scrollbars=yes\')" class="payment-link-button" style="display: inline-block; background: linear-gradient(135deg, #0a8754 0%, #065a36 100%); color: white; padding: 12px 24px; border-radius: 8px; border: none; margin: 10px 0; font-weight: bold; box-shadow: 0 2px 8px rgba(10, 135, 84, 0.3); cursor: pointer;">$1</button>')
+    // Lists: • text -> styled list items
+    .replace(/^• (.+)$/gm, '<div style="margin-left: 1em; margin-bottom: 0.3em;">• $1</div>')
+    // Numbered lists: 1. text
+    .replace(/^(\d+)\.\s+(.+)$/gm, '<div style="margin-left: 1em; margin-bottom: 0.3em;"><strong>$1.</strong> $2</div>')
+    // Newlines to <br> (but not for already processed lines)
+    .replace(/\n/g, '<br/>')
+    // Clean up excessive breaks
+    .replace(/(<br\/>){3,}/g, '<br/><br/>');
+};
+
 export default function App() {
   const [users, setUsers] = useState({});
   const [currentUser, setCurrentUser] = useState(null);
   const [currentUserKey, setCurrentUserKey] = useState("");
+  const currentUserKeyRef = useRef("");
 
   const [recentRequests, setRecentRequests] = useState([]);
 
@@ -109,6 +139,102 @@ export default function App() {
 
     load();
   }, []);
+
+  // Update ref when currentUserKey changes
+  useEffect(() => {
+    currentUserKeyRef.current = currentUserKey;
+  }, [currentUserKey]);
+
+  // Listen for payment completion messages
+  useEffect(() => {
+    console.log('🟢 Payment message listener initialized');
+
+    const handlePaymentMessage = async (event) => {
+      console.log('🟢 Message received in parent window:', event.data);
+
+      // Security: Only accept messages from our payment page
+      if (event.data && event.data.type === 'PAYMENT_SUCCESS') {
+        console.log('🟢 PAYMENT_SUCCESS message detected!');
+        const userKey = currentUserKeyRef.current;
+        console.log('🟢 Current user key:', userKey);
+
+        const paymentSuccessMessage = {
+          type: "bot",
+          text: event.data.message || "تم سداد المبلغ بنجاح! ✅",
+          userKey: userKey
+        };
+        console.log('🟢 Payment success message to add:', paymentSuccessMessage);
+
+        setMessagesByUser((prev) => {
+          console.log('🟢 Previous messages:', prev);
+          const updated = {
+            ...prev,
+            [userKey]: [...(prev[userKey] || []), paymentSuccessMessage]
+          };
+          console.log('🟢 Updated messages:', updated);
+          return updated;
+        });
+
+        // Refresh user data and recent requests
+        const [usersData, stateData] = await Promise.all([
+          fetch(`${API_BASE}/api/users`).then(res => res.json()),
+          fetch(`${API_BASE}/api/state`).then(res => res.json())
+        ]);
+
+        setUsers(usersData);
+        setCurrentUser(usersData[userKey]);
+        setRecentRequests(stateData.recent_requests || []);
+
+        // Only auto-renew license if payment was for DRIVER_LICENSE_RENEWAL
+        const paymentService = event.data.service || 'DRIVER_LICENSE_RENEWAL';
+        console.log('🟢 Payment service type:', paymentService);
+
+        if (paymentService === 'DRIVER_LICENSE_RENEWAL') {
+          // Automatically continue with license renewal after payment
+          console.log('🟢 Scheduling auto-renewal in 1.5 seconds...');
+          setTimeout(async () => {
+            try {
+              console.log('🟢 Sending auto-renewal request for user:', userKey);
+              const response = await fetch(`${API_BASE}/api/command`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  text: "جدد رخصتي",
+                  user_key: userKey
+                })
+              });
+
+              const data = await response.json();
+              console.log('🟢 Auto-renewal response:', data);
+
+              const renewalMessage = {
+                type: "bot",
+                text: data.visual,
+                userKey: userKey
+              };
+
+              setMessagesByUser((prev) => {
+                console.log('🟢 Adding renewal message to chat');
+                return {
+                  ...prev,
+                  [userKey]: [...(prev[userKey] || []), renewalMessage]
+                };
+              });
+              setRecentRequests(data.recent_requests || []);
+              console.log('🟢 Auto-renewal completed successfully');
+            } catch (err) {
+              console.error('❌ Error continuing with renewal:', err);
+            }
+          }, 1500); // Wait 1.5 seconds before continuing
+        } else {
+          console.log('🟢 Payment was for', paymentService, '- skipping auto-renewal');
+        }
+      }
+    };
+
+    window.addEventListener('message', handlePaymentMessage);
+    return () => window.removeEventListener('message', handlePaymentMessage);
+  }, []); // Empty dependency array - listener set up once
 
   // SEND TEXT COMMAND
   const sendCommand = async () => {
@@ -227,10 +353,181 @@ export default function App() {
     }
   };
 
+  // APPROVE REQUEST
+  const handleApproveRequest = async (requestId) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/request/approve/${requestId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" }
+      });
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+
+      const data = await res.json();
+
+      if (data.success) {
+        // Update current user data with renewed document
+        setCurrentUser(data.user);
+        setUsers(prev => ({
+          ...prev,
+          [currentUserKey]: data.user
+        }));
+
+        // Refresh recent requests
+        const stateRes = await fetch(`${API_BASE}/api/state`);
+        const stateData = await stateRes.json();
+        setRecentRequests(stateData.recent_requests || []);
+
+        // Add success message to chat
+        const successMessage = {
+          type: "bot",
+          text: data.message,
+          userKey: currentUserKey
+        };
+
+        setMessagesByUser((prev) => ({
+          ...prev,
+          [currentUserKey]: [...(prev[currentUserKey] || []), successMessage]
+        }));
+      }
+    } catch (error) {
+      console.error("Approve request error:", error);
+      const errorMessage = {
+        type: "bot",
+        text: "حدث خطأ في اعتماد الطلب. يرجى المحاولة مرة أخرى.",
+        error: true
+      };
+
+      setMessagesByUser((prev) => ({
+        ...prev,
+        [currentUserKey]: [...(prev[currentUserKey] || []), errorMessage]
+      }));
+    }
+  };
+
+  // Handle plate transfer confirmation
+  const handleConfirmTransfer = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/plate-transfer/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" }
+      });
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+
+      const data = await res.json();
+
+      if (data.success) {
+        // Update users data
+        const usersRes = await fetch(`${API_BASE}/api/users`);
+        const usersData = await usersRes.json();
+        setUsers(usersData);
+        setCurrentUser(usersData[currentUserKey]);
+
+        // Refresh recent requests
+        const stateRes = await fetch(`${API_BASE}/api/state`);
+        const stateData = await stateRes.json();
+        setRecentRequests(stateData.recent_requests || []);
+
+        // Add success message to seller's chat
+        const successMessage = {
+          type: "bot",
+          text: `✅ ${data.message}
+
+📋 تفاصيل العملية:
+• رقم المعاملة: ${data.transaction_id}
+• رقم الطلب: ${data.request_id}
+• من: ${data.seller_name}
+• إلى: ${data.buyer_name}
+• اللوحة: ${data.plate}
+• السعر: ${data.price} ريال
+• التاريخ: ${data.timestamp}
+
+${data.warnings}
+
+📝 تم تسجيل العملية في السجل الدائم.
+📩 تم إرسال إشعار للمشتري مع رابط الدفع.`,
+          userKey: currentUserKey
+        };
+
+        setMessagesByUser((prev) => ({
+          ...prev,
+          [currentUserKey]: [...(prev[currentUserKey] || []), successMessage]
+        }));
+
+        // Add notification to buyer's chat if available
+        if (data.buyer_key && data.buyer_notification) {
+          setMessagesByUser((prev) => ({
+            ...prev,
+            [data.buyer_key]: [...(prev[data.buyer_key] || []), {
+              type: "bot",
+              text: data.buyer_notification,
+              userKey: data.buyer_key
+            }]
+          }));
+        }
+      } else {
+        throw new Error(data.error || "فشل التأكيد");
+      }
+    } catch (error) {
+      console.error("Confirm transfer error:", error);
+      const errorMessage = {
+        type: "bot",
+        text: `حدث خطأ في تأكيد النقل: ${error.message}`,
+        error: true
+      };
+
+      setMessagesByUser((prev) => ({
+        ...prev,
+        [currentUserKey]: [...(prev[currentUserKey] || []), errorMessage]
+      }));
+    }
+  };
+
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Add event listeners for action buttons in messages
+  useEffect(() => {
+    const handleActionButtonClick = (event) => {
+      const target = event.target;
+
+      // Handle confirm transfer button
+      if (target.classList.contains('confirm-action-button')) {
+        const action = target.getAttribute('data-action');
+        if (action === 'CONFIRM_TRANSFER') {
+          handleConfirmTransfer();
+        }
+      }
+
+      // Handle cancel button
+      if (target.classList.contains('cancel-action-button')) {
+        const cancelMessage = {
+          type: "bot",
+          text: "تم إلغاء العملية.",
+          userKey: currentUserKey
+        };
+        setMessagesByUser((prev) => ({
+          ...prev,
+          [currentUserKey]: [...(prev[currentUserKey] || []), cancelMessage]
+        }));
+      }
+    };
+
+    // Add listener to document
+    document.addEventListener('click', handleActionButtonClick);
+
+    // Cleanup
+    return () => {
+      document.removeEventListener('click', handleActionButtonClick);
+    };
+  }, [currentUserKey, handleConfirmTransfer]);
 
   // Cleanup on unmount ONLY (not on mediaRecorder change!)
   useEffect(() => {
@@ -814,14 +1111,7 @@ export default function App() {
             ))}
           </div>
 
-          <div className="sidebar-hint">
-            <p>جرّب أوامر:</p>
-            <ul>
-              <li>جدد رخصتي</li>
-              <li>كم باقي على الإقامة؟</li>
-              <li>change user to alex</li>
-            </ul>
-          </div>
+  
         </aside>
 
         {/* ============== MAIN CONTENT ============== */}
@@ -859,10 +1149,10 @@ export default function App() {
                       كم باقي على الإقامة؟
                     </button>
                     <button
-                      onClick={() => setText("أبغى موعد جوازات")}
+                      onClick={() => setText("عرض جميع خدماتي")}
                       className="suggestion-btn"
                     >
-                      أبغى موعد جوازات
+                      عرض جميع خدماتي
                     </button>
                   </div>
                 </div>
@@ -883,7 +1173,10 @@ export default function App() {
                         {msg.isVoice && (
                           <span className="voice-badge">🎤 صوتي</span>
                         )}
-                        <div className="message-text">{msg.text}</div>
+                        <div
+                          className="message-text"
+                          dangerouslySetInnerHTML={{ __html: formatMessageText(msg.text) }}
+                        />
                         {msg.steps && (
                           <div className="message-steps">
                             <strong>📋 خطوات التنفيذ:</strong>
@@ -928,10 +1221,10 @@ export default function App() {
                           كم باقي على الإقامة؟
                         </button>
                         <button
-                          onClick={() => setText("أبغى موعد جوازات")}
+                          onClick={() => setText("عرض جميع خدماتي")}
                           className="suggestion-btn"
                         >
-                          أبغى موعد جوازات
+                          عرض جميع خدماتي
                         </button>
                       </div>
                     </div>
@@ -1015,10 +1308,28 @@ export default function App() {
                   <div key={req.request_id} className="request-item">
                     <div className="request-main">
                       <span>رقم: {req.request_id}</span>
-                      <span>الحالة: {req.status}</span>
+                      <span className={`request-status status-${req.status}`}>
+                        {req.status === "submitted" && "✅ قيد المعالجة"}
+                        {req.status === "completed" && "✅ مكتمل"}
+                        {req.status === "pending_documents" && "⏳ بانتظار المستندات"}
+                        {req.status === "pending_payment" && "💰 بانتظار السداد"}
+                        {!["submitted", "completed", "pending_documents", "pending_payment"].includes(req.status) && req.status}
+                      </span>
                     </div>
                     <div className="request-meta">
                       الخدمة: {req.service_id}
+                      {req.timestamp && (
+                        <>
+                          <br />
+                          <small>📅 {new Date(req.timestamp).toLocaleString('ar-SA', {
+                            year: 'numeric',
+                            month: '2-digit',
+                            day: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}</small>
+                        </>
+                      )}
                       {req.service_id === "5001" && req.plate && (
                         <>
                           <br />
@@ -1027,15 +1338,18 @@ export default function App() {
                             من: {req.from_user} → إلى: {req.to_user} |
                             السعر: {req.price} ریال
                           </small>
-                          {req.timestamp && (
-                            <>
-                              <br />
-                              <small>📅 {req.timestamp}</small>
-                            </>
-                          )}
                         </>
                       )}
                     </div>
+                    {/* Approve button for submitted requests */}
+                    {req.status === "submitted" && (
+                      <button
+                        className="approve-request-btn"
+                        onClick={() => handleApproveRequest(req.request_id)}
+                      >
+                        ✅ اعتماد الطلب
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>

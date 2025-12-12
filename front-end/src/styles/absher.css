@@ -414,10 +414,92 @@ button {
   color: var(--absher-text-dark);
 }
 
+.request-status {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.status-submitted {
+  background: rgba(10, 135, 84, 0.1);
+  color: var(--absher-green);
+}
+
+.status-completed {
+  background: rgba(10, 135, 84, 0.15);
+  color: var(--absher-green-dark);
+}
+
+.status-pending_documents,
+.status-pending_payment {
+  background: rgba(255, 193, 7, 0.1);
+  color: #f57c00;
+}
+
 .request-meta {
   font-size: 12px;
   margin-top: 4px;
   color: var(--absher-text);
+}
+
+/* Approve request button */
+.approve-request-btn {
+  margin-top: 10px;
+  width: 100%;
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #0a8754 0%, #065a36 100%);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 6px rgba(10, 135, 84, 0.2);
+}
+
+.approve-request-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(10, 135, 84, 0.4);
+}
+
+.approve-request-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(10, 135, 84, 0.3);
+}
+
+/* Payment link button hover effect */
+.payment-link-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(10, 135, 84, 0.4) !important;
+}
+
+.payment-link-button:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(10, 135, 84, 0.3) !important;
+}
+
+/* Confirm action button (green) */
+.confirm-action-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(10, 135, 84, 0.4) !important;
+}
+
+.confirm-action-button:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(10, 135, 84, 0.3) !important;
+}
+
+/* Cancel action button (red) */
+.cancel-action-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(220, 53, 69, 0.4) !important;
+}
+
+.cancel-action-button:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3) !important;
 }
 
 
@@ -670,6 +752,12 @@ button {
 
 .message-text {
   word-wrap: break-word;
+  line-height: 1.6;
+}
+
+.message-text strong {
+  font-weight: 600;
+  color: var(--absher-dark);
 }
 
 .message-steps {

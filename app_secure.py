@@ -2,7 +2,7 @@
 
 from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from pydantic import BaseModel, field_validator, Field
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
@@ -430,19 +430,43 @@ def detect_intent(user_text: str) -> str:
     """Detect user intent using GPT with sanitized input"""
     user_text_safe = sanitize_for_llm(user_text)
 
+    # Quick pattern matching for common intents (faster and more reliable)
+    text_lower = user_text.lower().strip()
+
+    # Dashboard patterns
+    if any(pattern in text_lower for pattern in [
+        "عرض جميع خدماتي", "عرض الخدمات", "وش خدماتي", "ملخص حسابي",
+        "عرض الملخص", "وش وضعي", "أبي أشوف كل شي", "show my services",
+        "my services", "dashboard", "خدماتي"
+    ]):
+        return "dashboard"
+
+    # Pay violations patterns
+    if any(pattern in text_lower for pattern in [
+        "ادفع مخالفاتي", "ابي ادفع مخالفات", "دفع المخالفات", "سداد المخالفات",
+        "ابغى ادفع المخالفات", "أبي أدفع مخالفاتي", "pay violations", "pay my violations"
+    ]):
+        return "pay_violations"
+
+    # Greeting patterns
+    if text_lower in ["مرحبا", "مرحباً", "hello", "hi", "السلام عليكم"]:
+        return "greeting"
+
     prompt = f"""
 You are an intent classifier for a Saudi government services assistant (ABSHER).
 Classify the following user text into ONE intent:
 
-SERVICE INTENTS (specific services):
+SERVICE INTENTS (specific services - these have PRIORITY over info):
+- dashboard: User wants to see ALL their services summary at once (عرض جميع الخدمات، خدماتي، ملخص)
 - id_renewal: User wants to renew ID/Iqama (تجديد الهوية/الإقامة)
 - id_status: User wants to check ID/Iqama expiry status (الاستعلام عن الصلاحية)
 - driver_license_renewal: User wants to renew driver license (تجديد رخصة القيادة)
 - passport_renewal: User wants to renew passport (تجديد جواز السفر)
 - plate_transfer: User wants to transfer vehicle plate ownership (نقل ملكية لوحة)
+- pay_violations: User wants to pay traffic violations directly (دفع المخالفات، سداد المخالفات)
 
-OTHER INTENTS:
-- info: General questions about services, how things work, requirements, procedures (معلومات عامة)
+OTHER INTENTS (use these ONLY if no service intent matches):
+- info: General questions about HOW services work, requirements, procedures (معلومات عامة عن كيفية العمل)
 - fraud_scam: User asking if service requires payment, asking about suspicious requests for money, verifying if something is legitimate (احتيال، طلب أموال)
 - switch_user: User wants to change account
 - greeting: Simple greetings (hello, hi, مرحبا)
@@ -460,6 +484,16 @@ EXAMPLES:
 - "تحقق من اللوحات في محفظتي" → plate_transfer
 - "شوف لوحاتي" → plate_transfer
 - "show my plates" → plate_transfer
+- "ابي ادفع مخالفاتي" → pay_violations
+- "دفع المخالفات" → pay_violations
+- "سداد المخالفات" → pay_violations
+- "وش خدماتي؟" → dashboard
+- "عرض جميع خدماتي" → dashboard
+- "show my services" → dashboard
+- "ملخص حسابي" → dashboard
+- "عرض الملخص" → dashboard
+- "أبي أشوف كل شي" → dashboard
+- "وش وضعي" → dashboard
 - "كيف أجدد رخصة القيادة؟" → info
 - "هل الخدمة مجانية؟" → info
 - "وصلتني رسالة تطلب دفع رسوم، هل هذا صحيح؟" → fraud_scam
@@ -496,8 +530,13 @@ Return ONLY the intent name (lowercase with underscores).
 
 def text_to_speech(text: str) -> Optional[bytes]:
     """
-    Convert text to speech using OpenAI TTS API.
+    Convert text to speech using OpenAI TTS API with Arabic optimization.
     Returns mp3 bytes or None on failure.
+
+    Improvements for Arabic:
+    - Uses 'alloy' voice (better multilingual support than 'onyx')
+    - Uses 'tts-1-hd' model for higher quality
+    - Preprocesses text for better Arabic pronunciation
     """
     try:
         # Truncate very long text
@@ -506,23 +545,74 @@ def text_to_speech(text: str) -> Optional[bytes]:
             text = text[:max_length] + "..."
             logger.warning(f"Text truncated to {max_length} characters for TTS")
 
-        response = client.audio.speech.create(
-            model="tts-1-hd",
-            voice="onyx",
-            input=text,
-            response_format="mp3"
-        )
-        audio_bytes = response.read()
+        # Preprocess Arabic text for better TTS
+        text = preprocess_arabic_for_tts(text)
 
-        if not audio_bytes or len(audio_bytes) < 100:
-            logger.error("TTS returned empty or invalid audio")
-            return None
+        # Try multiple voices in order of Arabic quality preference
+        # 'alloy' and 'shimmer' have better multilingual/Arabic support than 'onyx'
+        voices = ["alloy", "shimmer", "nova"]
 
-        return audio_bytes
+        for voice in voices:
+            try:
+                response = client.audio.speech.create(
+                    model="tts-1-hd",  # High-definition model
+                    voice=voice,
+                    input=text,
+                    response_format="mp3",
+                    speed=0.95  # Slightly slower for Arabic clarity
+                )
+                audio_bytes = response.read()
+
+                if audio_bytes and len(audio_bytes) >= 100:
+                    logger.info(f"TTS successful with voice: {voice}")
+                    return audio_bytes
+
+            except Exception as voice_error:
+                logger.warning(f"TTS failed with voice {voice}: {voice_error}")
+                continue
+
+        logger.error("TTS failed with all available voices")
+        return None
 
     except Exception as e:
         logger.error(f"TTS Error: {e}", exc_info=True)
         return None
+
+
+def preprocess_arabic_for_tts(text: str) -> str:
+    """
+    Preprocess Arabic text for better TTS pronunciation.
+
+    Improvements:
+    - Normalize Arabic characters
+    - Add spacing around numbers for better pronunciation
+    - Replace common abbreviations with full words
+    - Clean emoji/special characters that may cause issues
+    """
+    import re
+
+    # Normalize Arabic characters
+    text = text.replace('ي', 'ی')  # Normalize ya
+    text = text.replace('ك', 'ک')  # Normalize kaf
+
+    # Add spaces around numbers for better pronunciation
+    text = re.sub(r'(\d+)', r' \1 ', text)
+
+    # Replace common abbreviations with full words for better pronunciation
+    replacements = {
+        'ریال': 'ريال سعودي',
+        'km': 'كيلومتر',
+        'ID': 'رقم الهوية',
+        'R-': 'طلب رقم ',
+    }
+
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+
+    # Clean up multiple spaces
+    text = re.sub(r'\s+', ' ', text)
+
+    return text.strip()
 
 # ============================================
 # CONVERSATIONAL AI
@@ -845,6 +935,185 @@ def handle_intent(user_key: str, intent: str, user_text: Optional[str] = None) -
         else:
             return f"✅ {doc_type} سارية المفعول.\nتاريخ الانتهاء: {expiry_date_str}\nمتبقي: {days_left} يوم"
 
+    # ID Renewal
+    if intent == "id_renewal":
+        identity = user.get("national_id") or user.get("iqama")
+        doc_type = "الهوية الوطنية" if user["user_type"] == "المواطن" else "الإقامة"
+
+        if not identity:
+            return f"⚠️ لا يمكن العثور على معلومات {doc_type}."
+
+        # Check requirements
+        missing_requirements = []
+
+        # Check if user has service block
+        if user.get("service_block"):
+            missing_requirements.append("⚠️ يوجد إيقاف خدمات - يرجى مراجعة الجهة المختصة")
+
+        # For residents, check health insurance
+        if user["user_type"] != "المواطن":
+            # Assume they need health insurance (in real system, check expiry)
+            # missing_requirements.append("⚠️ التأمين الصحي منتهي - يرجى التجديد")
+            pass
+
+        # If there are missing requirements, return pending status
+        if missing_requirements:
+            req = create_request(user_key, "ID_RENEWAL", status="pending_documents")
+            missing_text = "\n".join([f"• {req}" for req in missing_requirements])
+
+            return f"""⏳ طلب تجديد {doc_type} بانتظار استكمال المتطلبات
+
+رقم الطلب: {req['request_id']}
+📅 تاريخ الطلب: {datetime.now().strftime("%Y-%m-%d %H:%M")}
+
+❌ المتطلبات الناقصة:
+{missing_text}
+
+📋 يرجى استكمال المتطلبات لمتابعة الطلب"""
+
+        # All requirements met - create approved request
+        req = create_request(user_key, "ID_RENEWAL", status="submitted")
+
+        return f"""✅ طلب تجديد {doc_type} تم بنجاح!
+
+رقم الطلب: {req['request_id']}
+📅 تاريخ الطلب: {datetime.now().strftime("%Y-%m-%d %H:%M")}
+الحالة: قيد المعالجة ✅
+
+📋 المتطلبات المستوفاة:
+• صورة شخصية حديثة ✅
+• سداد أي رسوم متأخرة ✅
+• التأمين الصحي ساري ✅
+• عدم وجود إيقاف خدمات ✅
+
+⏱️ مدة التنفيذ: 1-3 أيام عمل
+📍 يمكنك استلام {doc_type} من أقرب مكتب أحوال مدنية"""
+
+    # Driver License Renewal
+    if intent == "driver_license_renewal":
+        license = user.get("driver_license", {})
+
+        if not license:
+            return "⚠️ لا يمكن العثور على معلومات رخصة القيادة."
+
+        # Check violations
+        violations = user.get("violations", {})
+        violations_count = violations.get("count", 0)
+        violations_amount = violations.get("total_amount", 0)
+
+        # Check requirements
+        missing_requirements = []
+
+        # Check if there are unpaid violations
+        if violations_count > 0:
+            missing_requirements.append(f"⚠️ سداد المخالفات المرورية ({violations_count} مخالفة - {violations_amount} ریال)")
+
+        # Check service block
+        if user.get("service_block"):
+            missing_requirements.append("⚠️ يوجد إيقاف خدمات - يرجى مراجعة الجهة المختصة")
+
+        # If there are missing requirements (violations), check if there's already a pending request
+        if missing_requirements:
+            # Check if there's already a pending request for this user
+            existing_request = None
+            if user_key in USER_REQUESTS:
+                for req in USER_REQUESTS[user_key]:
+                    if req.get("service_id") == "DRIVER_LICENSE_RENEWAL" and req.get("status") == "pending_payment":
+                        existing_request = req
+                        break
+
+            # Only create new request if none exists
+            if not existing_request:
+                req = create_request(user_key, "DRIVER_LICENSE_RENEWAL", status="pending_payment")
+            else:
+                req = existing_request
+
+            missing_text = "\n".join([f"• {req}" for req in missing_requirements])
+
+            return f"""⏳ طلب تجديد رخصة القيادة بانتظار سداد المخالفات
+
+رقم الطلب: {req['request_id']}
+📅 تاريخ الطلب: {datetime.now().strftime("%Y-%m-%d %H:%M")}
+الحالة: بانتظار السداد 💰
+
+❌ المتطلبات الناقصة:
+{missing_text}
+
+💳 [اضغط هنا للدفع|http://localhost:8000/payment.html?request_id={req['request_id']}&amount={violations_amount}&user={user_key}]
+
+📋 يرجى سداد المخالفات أولاً ثم إعادة المحاولة"""
+
+        # All requirements met - check if there's a pending request that was just paid
+        existing_request = None
+        if user_key in USER_REQUESTS:
+            for req in USER_REQUESTS[user_key]:
+                if req.get("service_id") == "DRIVER_LICENSE_RENEWAL" and req.get("status") == "submitted":
+                    existing_request = req
+                    break
+
+        # If there's already a submitted request, return success with that request
+        if existing_request:
+            req = existing_request
+        else:
+            # Create new request only if no submitted request exists
+            req = create_request(user_key, "DRIVER_LICENSE_RENEWAL", status="submitted")
+
+        return f"""✅ طلب تجديد رخصة القيادة تم بنجاح!
+
+رقم الطلب: {req['request_id']}
+📅 تاريخ الطلب: {datetime.now().strftime("%Y-%m-%d %H:%M")}
+الحالة: قيد المعالجة ✅
+
+📋 المتطلبات المستوفاة:
+• فحص طبي / نظر ✅
+• التأمين ساري المفعول ✅
+• دفع رسوم التجديد ✅
+• لا توجد مخالفات غير مسددة ✅"""
+
+    # Passport Renewal
+    if intent == "passport_renewal":
+        passport = user.get("passport", {})
+
+        if not passport:
+            return "⚠️ لا يمكن العثور على معلومات جواز السفر."
+
+        # Create service request
+        create_request(user_key, "PASSPORT_RENEWAL")
+
+        return f"""✅ طلب تجديد جواز السفر تم بنجاح!
+
+📋 المتطلبات:
+• صلاحية الجواز (قبل انتهاءه بـ 6 أشهر)
+• دفع رسوم التجديد
+• عدم وجود بلاغ فقدان
+• الإقامة سارية (للمقيمين)
+
+⏱️ مدة التنفيذ: 1-3 أيام عمل
+📍 يمكنك استلام الجواز من مكتب الجوازات أو عبر البريد"""
+
+    # Pay Violations - Direct payment for traffic violations
+    if intent == "pay_violations":
+        violations = user.get("violations", {})
+        violations_count = violations.get("count", 0)
+        violations_amount = violations.get("total_amount", 0)
+
+        # Check if there are any violations to pay
+        if violations_count == 0:
+            return "✅ لا توجد مخالفات مرورية مسجلة باسمك حالياً"
+
+        # Create a payment request (no service request needed, just for tracking)
+        req_id = f"PAY-{len(REQUESTS)+1:04d}"
+
+        return f"""💰 سداد المخالفات المرورية
+
+📋 التفاصيل:
+• عدد المخالفات: {violations_count} مخالفة
+• المبلغ الإجمالي: {violations_amount} ریال
+
+💳 [اضغط هنا للدفع|http://localhost:8000/payment.html?request_id={req_id}&amount={violations_amount}&user={user_key}&service=violations]
+
+ℹ️ بعد الدفع، سيتم إزالة جميع المخالفات من سجلك فوراً"""
+
     # Fraud/Scam Detection
     if intent == "fraud_scam":
         return """🚨 تحذير من الاحتيال:
@@ -864,6 +1133,90 @@ def handle_intent(user_key: str, intent: str, user_text: Optional[str] = None) -
 📞 للبلاغ عن الاحتيال:
 • اتصل على 1909 (مركز الاتصال الموحد)
 • قدم بلاغ عبر تطبيق كلنا أمن"""
+
+    # Dashboard - Show all services
+    if intent == "dashboard":
+        # Helper function to calculate days until expiry
+        def days_until(expiry_str):
+            try:
+                expiry = datetime.strptime(expiry_str, "%Y-%m-%d")
+                return (expiry - datetime.now()).days
+            except:
+                return None
+
+        # Collect all service information
+        identity = user.get("national_id") or user.get("iqama")
+        license = user.get("driver_license", {})
+        passport = user.get("passport", {})
+        violations = user.get("violations", {})
+        wallet = user.get("wallet", {})
+        doc_type = "الهوية الوطنية" if user["user_type"] == "المواطن" else "الإقامة"
+
+        # Build comprehensive dashboard message
+        dashboard_msg = f"📊 **ملخص الخدمات لـ {user['name']}**\n\n"
+
+        # 1. Identity Status
+        if identity:
+            id_days = days_until(identity.get("expiry_date", ""))
+            if id_days is not None:
+                if id_days < 0:
+                    dashboard_msg += f"🔴 **{doc_type}:** منتهية منذ {abs(id_days)} يوم - جدد فوراً!\n"
+                elif id_days <= 30:
+                    dashboard_msg += f"🟡 **{doc_type}:** تنتهي خلال {id_days} يوم - جدد قريباً\n"
+                else:
+                    dashboard_msg += f"✅ **{doc_type}:** سارية ({id_days} يوم متبقي)\n"
+
+        # 2. Driver License
+        if license:
+            license_days = days_until(license.get("expiry_date", ""))
+            if license_days is not None:
+                if license_days < 0:
+                    dashboard_msg += f"🔴 **رخصة القيادة:** منتهية منذ {abs(license_days)} يوم - جدد فوراً!\n"
+                elif license_days <= 30:
+                    dashboard_msg += f"🟡 **رخصة القيادة:** تنتهي خلال {license_days} يوم\n"
+                else:
+                    dashboard_msg += f"✅ **رخصة القيادة:** سارية ({license_days} يوم متبقي)\n"
+
+        # 3. Passport
+        if passport:
+            passport_days = days_until(passport.get("expiry_date", ""))
+            if passport_days is not None:
+                if passport_days < 0:
+                    dashboard_msg += f"🔴 **جواز السفر:** منتهي منذ {abs(passport_days)} يوم\n"
+                elif passport_days <= 180:  # 6 months warning for passport
+                    dashboard_msg += f"🟡 **جواز السفر:** تنتهي خلال {passport_days} يوم\n"
+                else:
+                    dashboard_msg += f"✅ **جواز السفر:** ساري ({passport_days} يوم متبقي)\n"
+
+        # 4. Violations
+        if violations:
+            count = violations.get("count", 0)
+            total = violations.get("total_amount", 0)
+            if count > 0:
+                dashboard_msg += f"⚠️ **المخالفات المرورية:** {count} مخالفة - المبلغ: {total} ریال\n"
+            else:
+                dashboard_msg += f"✅ **المخالفات المرورية:** لا توجد مخالفات\n"
+
+        # 5. Vehicle Plates in Wallet
+        if wallet:
+            plates = wallet.get("plates", [])
+            if plates:
+                dashboard_msg += f"🚗 **محفظة اللوحات:** {len(plates)} لوحة - {', '.join(plates)}\n"
+            else:
+                dashboard_msg += f"📭 **محفظة اللوحات:** فارغة\n"
+
+        # 6. Recent Requests
+        recent_requests = USER_REQUESTS.get(user_key, [])[-3:]
+        if recent_requests:
+            dashboard_msg += f"\n📋 **آخر الطلبات ({len(recent_requests)}):**\n"
+            for req in recent_requests:
+                status_emoji = "✅" if req["status"] == "completed" else "⏳"
+                dashboard_msg += f"  {status_emoji} {req['service_id']} - {req['status']}\n"
+
+        dashboard_msg += f"\n💡 **نصيحة:** يمكنك قول \"جدد رخصتي\" أو \"انقل اللوحة ABC123\" لبدء أي خدمة"
+
+        log_audit_event(user_key, "dashboard_viewed", {})
+        return dashboard_msg
 
     # Plate Transfer
     if intent == "plate_transfer":
@@ -906,7 +1259,7 @@ Return ONLY the JSON object, nothing else.
                 to_user = extracted.get("to_user")
                 price = extracted.get("price", 0)
 
-                # If we have enough info, execute the transfer
+                # If we have enough info, show confirmation instead of executing immediately
                 if plate and to_user:
                     # Validate
                     validation = validate_plate_transfer(user_key, to_user, plate)
@@ -921,47 +1274,37 @@ Return ONLY the JSON object, nothing else.
                         warnings_text = "\n".join(fraud_check["warnings"])
                         return f"🚫 تم إيقاف العملية:\n\n{warnings_text}\n\nيرجى مراجعة أقرب مكتب مرور."
 
-                    # Execute transfer
-                    result = execute_plate_transfer(user_key, to_user, plate, price or 0)
+                    # Store pending transfer details in STATE
+                    STATE["pending_transfer"] = {
+                        "from_user": user_key,
+                        "to_user": to_user,
+                        "plate": plate,
+                        "price": price or 0,
+                        "fraud_check": fraud_check
+                    }
 
-                    if result["success"]:
-                        # Create request record for both users
-                        transfer_request = create_request(
-                            user_key,
-                            "PLATE_TRANSFER",
-                            status="completed"
-                        )
+                    # Get buyer name
+                    buyer = USERS.get(to_user, {})
+                    buyer_name = buyer.get("name", to_user)
+                    seller_name = user.get("name", user_key)
 
-                        # Add additional transfer details to the request
-                        transfer_request.update({
-                            "transaction_id": result['transaction_id'],
-                            "plate": plate,
-                            "from_user": user_key,
-                            "to_user": to_user,
-                            "price": price,
-                            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        })
+                    warnings_text = "\n".join(fraud_check["warnings"]) if fraud_check["warnings"] else "✅ لا توجد مؤشرات احتيال"
 
-                        # Update recent requests
-                        STATE["recent_requests"] = REQUESTS[-3:]
+                    # Return confirmation message instead of executing
+                    return f"""⏳ تأكيد نقل ملكية اللوحة
 
-                        warnings_text = "\n".join(fraud_check["warnings"])
-                        return f"""✅ {result['message']}
-
-📋 تفاصيل العملية:
-• رقم المعاملة: {result['transaction_id']}
-• رقم الطلب: {transfer_request['request_id']}
-• من: {result['before_state']['seller']['name']}
-• إلى: {result['after_state']['buyer']['name']}
+📋 تفاصيل العملية المطلوبة:
+• البائع: {seller_name}
+• المشتري: {buyer_name}
 • اللوحة: {plate}
-• السعر: {price} ريال
-• التاريخ: {transfer_request['timestamp']}
+• السعر: {price or 0} ريال
 
 {warnings_text}
 
-📝 تم تسجيل العملية في السجل الدائم."""
-                    else:
-                        return f"❌ فشل النقل: {result.get('error', 'خطأ غير معروف')}"
+⚠️ تنبيه: النقل نهائي ولا يمكن التراجع عنه
+
+[✅ تأكيد النقل|CONFIRM_TRANSFER:{user_key}:{to_user}:{plate}:{price or 0}]
+[❌ إلغاء|CANCEL]"""
 
             except Exception as e:
                 logger.warning(f"Failed to extract transfer details: {e}")
@@ -995,6 +1338,15 @@ Return ONLY the JSON object, nothing else.
 @app.get("/")
 def root():
     return {"status": "ok", "service": "ABSHER Digital Services API", "version": "2.0.0"}
+
+@app.get("/payment.html")
+async def get_payment_page():
+    """Serve the payment page"""
+    payment_file_path = os.path.join(os.path.dirname(__file__), "payment.html")
+    if os.path.exists(payment_file_path):
+        return FileResponse(payment_file_path, media_type="text/html")
+    else:
+        raise HTTPException(status_code=404, detail="Payment page not found")
 
 @app.get("/api/users")
 def get_users(request: Request):
@@ -1228,6 +1580,256 @@ async def transfer_plate(transfer: PlateTransferRequest, request: Request):
     except Exception as e:
         logger.error(f"Plate transfer error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="حدث خطأ في عملية النقل")
+
+@app.post("/api/payment")
+async def process_payment(payment: PaymentRequest, request: Request):
+    """Process payment for violations or services"""
+    try:
+        # Rate limit: 10 payments per hour per user
+        if not rate_limiter.is_allowed(f"payment:{payment.user_id}", 10, 3600):
+            raise HTTPException(status_code=429, detail="تم تجاوز الحد الأقصى لعمليات الدفع (10 في الساعة)")
+
+        # Validate user exists
+        if payment.user_id not in USERS:
+            raise HTTPException(status_code=404, detail="المستخدم غير موجود")
+
+        user = USERS[payment.user_id]
+
+        # Log payment event
+        log_audit_event(
+            payment.user_id,
+            "payment_completed",
+            {
+                "amount": payment.amount,
+                "service": payment.service
+            },
+            request.client.host
+        )
+
+        # Clear violations if payment is for violations
+        if payment.service == "violations" or payment.service == "DRIVER_LICENSE_RENEWAL":
+            violations = user.get("violations", {})
+            if violations.get("total_amount", 0) > 0:
+                user["violations"] = {"count": 0, "total_amount": 0, "details": []}
+
+                # Only update license renewal requests if payment is for DRIVER_LICENSE_RENEWAL
+                if payment.service == "DRIVER_LICENSE_RENEWAL":
+                    # Update any pending requests to submitted status in USER_REQUESTS
+                    if payment.user_id in USER_REQUESTS:
+                        for req in USER_REQUESTS[payment.user_id]:
+                            if req.get("status") == "pending_payment" and req.get("service_id") == "DRIVER_LICENSE_RENEWAL":
+                                req["status"] = "submitted"
+                                req["payment_timestamp"] = datetime.now().isoformat()
+
+                    # Also update in global REQUESTS list
+                    for req in REQUESTS:
+                        if req.get("user_key") == payment.user_id and req.get("status") == "pending_payment" and req.get("service_id") == "DRIVER_LICENSE_RENEWAL":
+                            req["status"] = "submitted"
+                            req["payment_timestamp"] = datetime.now().isoformat()
+
+                    # Update STATE recent_requests
+                    STATE["recent_requests"] = USER_REQUESTS.get(payment.user_id, [])[-3:]
+
+                return {
+                    "success": True,
+                    "message": f"تم سداد المبلغ {payment.amount} ریال بنجاح! ✅",
+                    "receipt_id": f"PAY-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:8].upper()}",
+                    "violations_cleared": True
+                }
+
+        # Generic payment success
+        return {
+            "success": True,
+            "message": f"تم سداد المبلغ {payment.amount} ریال بنجاح! ✅",
+            "receipt_id": f"PAY-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:8].upper()}"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Payment error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="حدث خطأ في عملية الدفع")
+
+@app.post("/api/request/approve/{request_id}")
+async def approve_request(request_id: str, request: Request):
+    """Approve and complete a service request"""
+    try:
+        # Find the request
+        target_request = None
+        user_key = None
+
+        for req in REQUESTS:
+            if req.get("request_id") == request_id:
+                target_request = req
+                user_key = req.get("user_key")
+                break
+
+        if not target_request:
+            raise HTTPException(status_code=404, detail="الطلب غير موجود")
+
+        if not user_key or user_key not in USERS:
+            raise HTTPException(status_code=404, detail="المستخدم غير موجود")
+
+        user = USERS[user_key]
+        service_id = target_request.get("service_id")
+
+        # Mark request as completed
+        target_request["status"] = "completed"
+        target_request["completed_timestamp"] = datetime.now().isoformat()
+
+        # Update the request in USER_REQUESTS as well
+        if user_key in USER_REQUESTS:
+            for req in USER_REQUESTS[user_key]:
+                if req.get("request_id") == request_id:
+                    req["status"] = "completed"
+                    req["completed_timestamp"] = datetime.now().isoformat()
+
+        # Update STATE recent_requests
+        STATE["recent_requests"] = USER_REQUESTS.get(user_key, [])[-3:]
+
+        # Perform service-specific actions
+        if service_id == "ID_RENEWAL":
+            # Renew the ID/Iqama - extend expiry by 5 years (Gregorian)
+            if user["user_type"] == "المواطن" and "national_id" in user:
+                current_expiry = datetime.strptime(user["national_id"]["expiry_date"], "%Y-%m-%d")
+                new_expiry = current_expiry + timedelta(days=365*5)
+                user["national_id"]["expiry_date"] = new_expiry.strftime("%Y-%m-%d")
+                user["national_id"]["status"] = "valid"  # Update status to valid
+            elif "iqama" in user:
+                current_expiry = datetime.strptime(user["iqama"]["expiry_date"], "%Y-%m-%d")
+                new_expiry = current_expiry + timedelta(days=365*5)
+                user["iqama"]["expiry_date"] = new_expiry.strftime("%Y-%m-%d")
+                user["iqama"]["status"] = "valid"  # Update status to valid
+
+        elif service_id == "DRIVER_LICENSE_RENEWAL":
+            # Renew driver license - extend expiry by 10 years
+            if "driver_license" in user:
+                current_expiry = datetime.strptime(user["driver_license"]["expiry_date"], "%Y-%m-%d")
+                new_expiry = current_expiry + timedelta(days=365*10)
+                user["driver_license"]["expiry_date"] = new_expiry.strftime("%Y-%m-%d")
+
+        elif service_id == "PASSPORT_RENEWAL":
+            # Renew passport - extend expiry by 5 years
+            if "passport" in user:
+                current_expiry = datetime.strptime(user["passport"]["expiry_date"], "%Y-%m-%d")
+                new_expiry = current_expiry + timedelta(days=365*5)
+                user["passport"]["expiry_date"] = new_expiry.strftime("%Y-%m-%d")
+
+        # Log audit event
+        log_audit_event(
+            user_key,
+            "request_approved",
+            {
+                "request_id": request_id,
+                "service_id": service_id
+            },
+            request.client.host
+        )
+
+        return {
+            "success": True,
+            "message": f"تم اعتماد الطلب {request_id} بنجاح! ✅",
+            "request": target_request,
+            "user": user
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Request approval error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="حدث خطأ في اعتماد الطلب")
+
+@app.post("/api/plate-transfer/confirm")
+async def confirm_plate_transfer(request: Request):
+    """Confirm and execute pending plate transfer"""
+    try:
+        # Get pending transfer from STATE
+        pending = STATE.get("pending_transfer")
+        if not pending:
+            raise HTTPException(status_code=400, detail="لا يوجد طلب نقل معلق")
+
+        from_user = pending["from_user"]
+        to_user = pending["to_user"]
+        plate = pending["plate"]
+        price = pending["price"]
+        fraud_check = pending["fraud_check"]
+
+        # Validate users still exist
+        if from_user not in USERS or to_user not in USERS:
+            raise HTTPException(status_code=404, detail="المستخدم غير موجود")
+
+        # Execute transfer
+        result = execute_plate_transfer(from_user, to_user, plate, price)
+
+        if result["success"]:
+            # Create request record for seller
+            transfer_request = create_request(
+                from_user,
+                "PLATE_TRANSFER",
+                status="completed"
+            )
+
+            # Add additional transfer details
+            transfer_request.update({
+                "transaction_id": result['transaction_id'],
+                "plate": plate,
+                "from_user": from_user,
+                "to_user": to_user,
+                "price": price,
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            })
+
+            # Update recent requests
+            STATE["recent_requests"] = REQUESTS[-3:]
+
+            # Clear pending transfer
+            STATE["pending_transfer"] = None
+
+            # Prepare payment link for buyer
+            buyer = USERS[to_user]
+            payment_link = f"http://localhost:8000/payment.html?request_id={transfer_request['request_id']}&amount={price}&user={to_user}&service=PLATE_TRANSFER"
+
+            warnings_text = "\n".join(fraud_check["warnings"]) if fraud_check["warnings"] else "✅ لا توجد مؤشرات احتيال"
+
+            # Create notification for buyer
+            buyer_notification = f"""📩 إشعار: نقل لوحة جديدة
+
+تم نقل اللوحة **{plate}** إليك من {result['before_state']['seller']['name']}
+
+📋 التفاصيل:
+• اللوحة: {plate}
+• السعر: {price} ريال
+• رقم المعاملة: {result['transaction_id']}
+
+💳 يرجى إتمام الدفع لاستكمال النقل:
+{payment_link}"""
+
+            return {
+                "success": True,
+                "message": f"✅ {result['message']}",
+                "transaction_id": result['transaction_id'],
+                "request_id": transfer_request['request_id'],
+                "seller_name": result['before_state']['seller']['name'],
+                "buyer_name": result['after_state']['buyer']['name'],
+                "plate": plate,
+                "price": price,
+                "timestamp": transfer_request['timestamp'],
+                "warnings": warnings_text,
+                "payment_link": payment_link,
+                "buyer_notification": buyer_notification,
+                "buyer_key": to_user
+            }
+        else:
+            return {
+                "success": False,
+                "error": result.get("error", "خطأ غير معروف")
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Plate transfer confirmation error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="حدث خطأ في تأكيد النقل")
 
 @app.post("/api/voice")
 async def process_voice(
