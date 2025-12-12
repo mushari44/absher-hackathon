@@ -19,7 +19,22 @@ export default function App() {
   const [currentUserKey, setCurrentUserKey] = useState("");
 
   const [recentRequests, setRecentRequests] = useState([]);
-  const [messages, setMessages] = useState([]); // ChatGPT-like conversation history
+
+  // Store messages per user: { userKey: [messages] }
+  const [messagesByUser, setMessagesByUser] = useState({});
+
+  // Current user's messages (derived from messagesByUser)
+  const messages = messagesByUser[currentUserKey] || [];
+
+  // Helper function to update messages for the current user
+  const setCurrentUserMessages = (updater) => {
+    setMessagesByUser(prev => ({
+      ...prev,
+      [currentUserKey]: typeof updater === 'function'
+        ? updater(prev[currentUserKey] || [])
+        : updater
+    }));
+  };
 
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
@@ -27,32 +42,14 @@ export default function App() {
   const [recording, setRecording] = useState(false);
   const [mediaRecorder, setMediaRecorder] = useState(null);
   const currentAudioRef = useRef(null); // Track currently playing audio
+  const audioUrlsRef = useRef([]); // Track audio URLs for cleanup
   const chunksRef = useRef([]); // Use ref to avoid stale closure
   const streamRef = useRef(null); // Track audio stream for cleanup
   const animationFrameRef = useRef(null); // Track animation frame for cleanup
-
-  // Fetch personalized notification for a user and add to chat
-  const fetchNotification = async (userKey) => {
-    try {
-      const res = await fetch(`${API_BASE}/api/notification/${userKey}`, {
-        headers: {
-          "ngrok-skip-browser-warning": "true",
-        },
-      });
-      const data = await res.json();
-      if (!data.error) {
-        // Add notification as first assistant message in chat
-        const welcomeMessage = {
-          type: "assistant",
-          text: data.notification,
-          isWelcome: true,  // Flag to identify welcome messages
-        };
-        setMessages([welcomeMessage]);  // Replace messages with welcome
-      }
-    } catch (err) {
-      console.error("Notification fetch error:", err);
-    }
-  };
+  const audioCtxRef = useRef(null); // Track AudioContext for cleanup
+  const stopTimeoutRef = useRef(null); // Auto-stop timeout
+  const messagesEndRef = useRef(null); // Scroll to bottom ref
+  const isStartingRef = useRef(false); // Prevent double-start
 
   useEffect(() => {
     const load = async () => {
@@ -75,13 +72,36 @@ export default function App() {
         const stateData = await stateRes.json();
         console.log("stateData:", stateData);
 
+        const initialUserKey = stateData.current_user_key;
+
         setUsers(usersData);
-        setCurrentUser(usersData[stateData.current_user_key]);
-        setCurrentUserKey(stateData.current_user_key);
+        setCurrentUser(usersData[initialUserKey]);
         setRecentRequests(stateData.recent_requests || []);
 
-        // Fetch personalized notification for initial user
-        await fetchNotification(stateData.current_user_key);
+        // Fetch notification and set it in messagesByUser BEFORE setting currentUserKey
+        const notificationRes = await fetch(`${API_BASE}/api/notification/${initialUserKey}`, {
+          headers: {
+            "ngrok-skip-browser-warning": "true",
+          },
+        });
+        const notificationData = await notificationRes.json();
+
+        if (!notificationData.error) {
+          const welcomeMessage = {
+            type: "assistant",
+            text: notificationData.notification,
+            isWelcome: true,
+            userKey: initialUserKey,
+          };
+
+          // Set initial messages for the initial user
+          setMessagesByUser({
+            [initialUserKey]: [welcomeMessage]
+          });
+        }
+
+        // Set currentUserKey AFTER setting messages
+        setCurrentUserKey(initialUserKey);
       } catch (err) {
         console.error("LOAD ERROR:", err);
       }
@@ -92,59 +112,136 @@ export default function App() {
 
   // SEND TEXT COMMAND
   const sendCommand = async () => {
-    if (!text.trim()) return;
+    if (!text.trim() || loading) return;
 
     // Add user message to chat
-    const userMessage = { type: "user", text: text };
-    setMessages((prev) => [...prev, userMessage]);
+    const userMessage = { type: "user", text: text, userKey: currentUserKey };
+    setCurrentUserMessages((prev) => [...prev, userMessage]);
 
     const userInput = text;
     setText("");
     setLoading(true);
 
-    const res = await fetch(`${API_BASE}/api/command`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: userInput }),
-    });
+    try {
+      const res = await fetch(`${API_BASE}/api/command`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: userInput, user_key: currentUserKey }),
+      });
 
-    const data = await res.json();
-    setCurrentUser(data.current_user);
-    setRecentRequests(data.recent_requests || []);
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
 
-    // Add assistant response to chat
-    const assistantMessage = {
-      type: "assistant",
-      text: data.visual,
-      steps: data.action_steps,
-      intent: data.intent,
-    };
-    setMessages((prev) => [...prev, assistantMessage]);
-    setLoading(false);
+      const data = await res.json();
+      setCurrentUser(data.current_user);
+      setRecentRequests(data.recent_requests || []);
+
+      // Add assistant response to chat
+      const assistantMessage = {
+        type: "assistant",
+        text: data.visual,
+        steps: data.action_steps,
+        intent: data.intent,
+        userKey: currentUserKey,
+      };
+      setCurrentUserMessages((prev) => [...prev, assistantMessage]);
+    } catch (error) {
+      console.error("sendCommand error:", error);
+      setCurrentUserMessages((prev) => [
+        ...prev,
+        { type: "assistant", text: "تعذر تنفيذ الطلب الآن، حاول مرة أخرى لاحقاً.", error: true },
+      ]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   // SWITCH USER
   const switchUser = async (key) => {
-    const res = await fetch(`${API_BASE}/api/switch-user`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_key: key }),
-    });
+    // Don't switch if already on this user
+    if (key === currentUserKey) {
+      return;
+    }
 
-    const data = await res.json();
-    setCurrentUser(data.current_user);
-    setCurrentUserKey(key);
+    try {
+      const res = await fetch(`${API_BASE}/api/switch-user`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_key: key }),
+      });
 
-    // Fetch personalized notification for new user
-    await fetchNotification(key);
+      const data = await res.json();
+      if (data.error) {
+        // Use old currentUserKey since we haven't switched yet
+        const errorMessage = {
+          type: "assistant",
+          text: `تعذر تغيير المستخدم: ${data.error}`,
+          error: true
+        };
+        setMessagesByUser(prev => ({
+          ...prev,
+          [currentUserKey]: [...(prev[currentUserKey] || []), errorMessage]
+        }));
+        return;
+      }
+
+      setCurrentUser(data.current_user);
+      setCurrentUserKey(key);
+
+      // Only fetch notification if this user doesn't have messages yet
+      if (!messagesByUser[key] || messagesByUser[key].length === 0) {
+        // Fetch notification for new user
+        const notificationRes = await fetch(`${API_BASE}/api/notification/${key}`, {
+          headers: {
+            "ngrok-skip-browser-warning": "true",
+          },
+        });
+        const notificationData = await notificationRes.json();
+
+        if (!notificationData.error) {
+          const welcomeMessage = {
+            type: "assistant",
+            text: notificationData.notification,
+            isWelcome: true,
+            userKey: key,
+          };
+
+          setMessagesByUser(prev => ({
+            ...prev,
+            [key]: [welcomeMessage]
+          }));
+        }
+      }
+    } catch (error) {
+      console.error("switchUser error:", error);
+      const errorMessage = {
+        type: "assistant",
+        text: "تعذر تغيير المستخدم حالياً.",
+        error: true
+      };
+      setMessagesByUser(prev => ({
+        ...prev,
+        [currentUserKey]: [...(prev[currentUserKey] || []), errorMessage]
+      }));
+    }
   };
 
-  // Cleanup on unmount
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  // Cleanup on unmount ONLY (not on mediaRecorder change!)
   useEffect(() => {
     return () => {
-      // Stop recording if active
-      if (mediaRecorder && mediaRecorder.state !== "inactive") {
-        mediaRecorder.stop();
+      console.log('🧹 Component unmounting - cleaning up');
+
+      // Stop recording if active - use ref to get latest value
+      const recorder = mediaRecorder;
+      if (recorder && recorder.state !== "inactive") {
+        console.log('🛑 Stopping recorder on unmount');
+        recorder.stop();
       }
       // Stop audio stream
       const stream = streamRef.current;
@@ -156,16 +253,35 @@ export default function App() {
       if (audio) {
         audio.pause();
       }
+      // Revoke all audio URLs to prevent memory leaks
+      audioUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
+      audioUrlsRef.current = [];
       // Cancel animation frame
       const animFrame = animationFrameRef.current;
       if (animFrame) {
         cancelAnimationFrame(animFrame);
       }
+      // Close audio context
+      if (audioCtxRef.current) {
+        audioCtxRef.current.close().catch(() => {});
+        audioCtxRef.current = null;
+      }
     };
-  }, [mediaRecorder]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Run ONLY on mount/unmount, not on mediaRecorder changes!
+
 
   // START VOICE RECORD
   const startRecording = async () => {
+    // Prevent double-triggering
+    if (recording || mediaRecorder || isStartingRef.current) {
+      console.log('⚠️ Recording already in progress, ignoring duplicate start');
+      return;
+    }
+
+    isStartingRef.current = true;
+    console.log('🎙️ Start recording requested');
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -178,121 +294,301 @@ export default function App() {
       // Store stream for cleanup
       streamRef.current = stream;
 
-      // Reset chunks array
+      // Reset chunks array BEFORE starting
       chunksRef.current = [];
 
-      // Set recording state first
-      setRecording(true);
+      // Start recorder BEFORE setting state (critical for waveform timing)
+      // Try multiple codecs for best compatibility
+      let mimeType = 'audio/webm';
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        mimeType = 'audio/webm;codecs=opus';
+        console.log('✅ Using codec: audio/webm;codecs=opus');
+      } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+        mimeType = 'audio/webm';
+        console.log('⚠️ Falling back to: audio/webm');
+      } else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
+        mimeType = 'audio/ogg;codecs=opus';
+        console.log('⚠️ Falling back to: audio/ogg;codecs=opus');
+      } else {
+        console.warn('⚠️ No preferred codec supported, using default');
+      }
 
-      // Start recorder
-      const recorder = new MediaRecorder(stream, {
-        mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-          ? 'audio/webm;codecs=opus'
-          : 'audio/webm'
-      });
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
 
       recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
+        if (e.data && e.data.size > 0) {
           chunksRef.current.push(e.data);
+          console.log(`📦 Chunk received: ${e.data.size} bytes. Total chunks: ${chunksRef.current.length}`);
         }
       };
 
       recorder.onstop = () => {
+        console.log(`🛑 Recorder stopped. Total chunks: ${chunksRef.current.length}`);
+        console.log(`📊 Recorder final state: ${recorder.state}`);
+
+        // Create blob from chunks
         const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        console.log(`🎵 Blob created: ${blob.size} bytes`);
+
+        // Debug: Check why we got 0 chunks
+        if (chunksRef.current.length === 0) {
+          console.error('❌ ZERO chunks collected! This means ondataavailable never fired or stream stopped immediately.');
+        }
 
         // Validate blob size
-        if (blob.size < 1000) {
-          alert('التسجيل قصير جداً. الرجاء المحاولة مرة أخرى.');
+        if (blob.size < 500) {
+          setCurrentUserMessages((prev) => [
+            ...prev,
+            { type: "assistant", text: "التسجيل قصير جداً. الرجاء المحاولة مرة أخرى.", error: true },
+          ]);
+
+          // Cleanup after error
+          if (streamRef.current) {
+            streamRef.current.getTracks().forEach((t) => t.stop());
+            streamRef.current = null;
+          }
+          if (audioCtxRef.current) {
+            audioCtxRef.current.close().catch(() => {});
+            audioCtxRef.current = null;
+          }
+          if (animationFrameRef.current) {
+            cancelAnimationFrame(animationFrameRef.current);
+            animationFrameRef.current = null;
+          }
+          setMediaRecorder(null);
+          setRecording(false);
+          chunksRef.current = [];
           return;
         }
 
+        // Send valid blob
         sendVoice(blob);
 
-        // Cleanup stream
+        // Cleanup after successful recording
         if (streamRef.current) {
           streamRef.current.getTracks().forEach((t) => t.stop());
           streamRef.current = null;
         }
+        if (audioCtxRef.current) {
+          audioCtxRef.current.close().catch(() => {});
+          audioCtxRef.current = null;
+        }
+        if (animationFrameRef.current) {
+          cancelAnimationFrame(animationFrameRef.current);
+          animationFrameRef.current = null;
+        }
+        setMediaRecorder(null);
+        setRecording(false);
+        chunksRef.current = [];
       };
 
       recorder.onerror = (e) => {
-        console.error('MediaRecorder error:', e);
-        alert('حدث خطأ في التسجيل. الرجاء المحاولة مرة أخرى.');
-        stopRecording();
+        console.error('❌ MediaRecorder error:', e);
+        setCurrentUserMessages((prev) => [
+          ...prev,
+          { type: "assistant", text: "حدث خطأ في التسجيل. الرجاء المحاولة مرة أخرى.", error: true },
+        ]);
+
+        // Force cleanup
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach((t) => t.stop());
+          streamRef.current = null;
+        }
+        if (audioCtxRef.current) {
+          audioCtxRef.current.close().catch(() => {});
+          audioCtxRef.current = null;
+        }
+        if (animationFrameRef.current) {
+          cancelAnimationFrame(animationFrameRef.current);
+          animationFrameRef.current = null;
+        }
+        setMediaRecorder(null);
+        setRecording(false);
+        chunksRef.current = [];
       };
 
-      recorder.start(200);
+      // Store recorder BEFORE starting (critical!)
       setMediaRecorder(recorder);
+      setRecording(true);
 
-      // Setup waveform visualization after state is set
+      // Start recording with small timeslices for better data flow
+      try {
+        recorder.start(200);
+        console.log('🎤 Recording started');
+        console.log(`📊 Recorder state: ${recorder.state}`);
+        console.log(`📊 Stream active: ${stream.active}`);
+        console.log(`📊 Stream tracks: ${stream.getTracks().length}`);
+
+        // Verify recorder is actually recording
+        setTimeout(() => {
+          if (recorder.state !== "recording") {
+            console.error(`❌ Recorder state is ${recorder.state} after start - should be "recording"!`);
+            setCurrentUserMessages((prev) => [
+              ...prev,
+              { type: "assistant", text: "فشل بدء التسجيل. تأكد من السماح بالوصول للميكروفون.", error: true },
+            ]);
+            // Cleanup
+            if (streamRef.current) {
+              streamRef.current.getTracks().forEach((t) => t.stop());
+              streamRef.current = null;
+            }
+            setMediaRecorder(null);
+            setRecording(false);
+            isStartingRef.current = false;
+          }
+        }, 100);
+      } catch (startError) {
+        console.error('❌ recorder.start() failed:', startError);
+        setCurrentUserMessages((prev) => [
+          ...prev,
+          { type: "assistant", text: `فشل بدء التسجيل: ${startError.message}`, error: true },
+        ]);
+        // Cleanup
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach((t) => t.stop());
+          streamRef.current = null;
+        }
+        setMediaRecorder(null);
+        setRecording(false);
+        isStartingRef.current = false;
+        return;
+      }
+
+      // Clear the starting flag after a short delay
       setTimeout(() => {
+        isStartingRef.current = false;
+        console.log(`✅ isStartingRef cleared. Recorder state: ${recorder.state}`);
+      }, 500);
+
+      // Safety auto-stop after 15 seconds
+      stopTimeoutRef.current = setTimeout(() => {
+        console.log('⏰ Auto-stop timeout triggered');
+        if (recorder && recorder.state === "recording") {
+          recorder.stop();
+        }
+      }, 15000);
+
+      // Setup waveform visualization after a small delay to ensure recorder is stable
+      setTimeout(() => {
+        // Only setup if recorder is still recording
+        if (!recorder || recorder.state !== "recording") {
+          console.log('⚠️ Recorder not recording, skipping waveform setup');
+          return;
+        }
+
         const canvas = document.getElementById("waveform");
         if (canvas) {
-          const audioCtx = new AudioContext();
-          const source = audioCtx.createMediaStreamSource(stream);
-          const analyser = audioCtx.createAnalyser();
-          analyser.fftSize = 256;
-          source.connect(analyser);
+          try {
+            // @ts-ignore - AudioContext fallback for older browsers
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            audioCtxRef.current = audioCtx;
+            const source = audioCtx.createMediaStreamSource(stream);
+            const analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 256;
+            analyser.smoothingTimeConstant = 0.8;
+            source.connect(analyser);
+            console.log('✅ Waveform visualization setup complete');
 
-          const ctx = canvas.getContext("2d");
+            const ctx = canvas.getContext("2d");
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
 
-          function drawWave() {
-            if (!recorder || recorder.state === "inactive") {
-              if (animationFrameRef.current) {
-                cancelAnimationFrame(animationFrameRef.current);
-                animationFrameRef.current = null;
+            function drawWave() {
+              // Check if recorder is still active
+              if (!recorder || recorder.state === "inactive") {
+                if (animationFrameRef.current) {
+                  cancelAnimationFrame(animationFrameRef.current);
+                  animationFrameRef.current = null;
+                }
+                // Clear canvas on stop
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                return;
               }
-              return;
+
+              animationFrameRef.current = requestAnimationFrame(drawWave);
+
+              analyser.getByteFrequencyData(dataArray);
+
+              ctx.fillStyle = "rgba(255, 255, 255, 0.1)";
+              ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+              ctx.strokeStyle = "#0A8754";
+              ctx.lineWidth = 2;
+              ctx.beginPath();
+
+              const sliceWidth = canvas.width / bufferLength;
+              let x = 0;
+
+              for (let i = 0; i < bufferLength; i++) {
+                const v = dataArray[i] / 255.0;
+                const y = canvas.height / 2 - v * 20;
+
+                if (i === 0) {
+                  ctx.moveTo(x, y);
+                } else {
+                  ctx.lineTo(x, y);
+                }
+                x += sliceWidth;
+              }
+
+              ctx.stroke();
             }
 
-            animationFrameRef.current = requestAnimationFrame(drawWave);
-
-            let dataArray = new Uint8Array(analyser.frequencyBinCount);
-            analyser.getByteFrequencyData(dataArray);
-
-            ctx.fillStyle = "transparent";
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-            ctx.strokeStyle = "#0A8754";
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-
-            let sliceWidth = canvas.width / dataArray.length;
-            let x = 0;
-
-            for (let i = 0; i < dataArray.length; i++) {
-              let v = dataArray[i] / 255.0;
-              let y = canvas.height / 2 - v * 15;
-
-              i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-              x += sliceWidth;
-            }
-
-            ctx.stroke();
+            drawWave();
+          } catch (waveformError) {
+            console.error('❌ Waveform setup error:', waveformError);
+            // Continue recording even if waveform fails
           }
-
-          drawWave();
         }
-      }, 100);
+      }, 200);
     } catch (error) {
-      console.error("Error starting recording:", error);
-      alert("تعذر الوصول إلى الميكروفون. يرجى السماح بالوصول للميكروفون.");
+      console.error("❌ Error starting recording:", error);
+      setCurrentUserMessages((prev) => [
+        ...prev,
+        { type: "assistant", text: "تعذر الوصول إلى الميكروفون. يرجى السماح بالوصول للميكروفون.", error: true },
+      ]);
+      setRecording(false);
+      isStartingRef.current = false; // Reset on error
     }
   };
 
   // STOP RECORD
   const stopRecording = () => {
+    console.log('⏹️ Stop recording called');
+
+    // Don't stop if we're still starting
+    if (isStartingRef.current) {
+      console.log('⚠️ Still starting recording, ignoring stop request');
+      return;
+    }
+
+    // Don't stop if not recording
+    if (!recording && (!mediaRecorder || mediaRecorder.state === "inactive")) {
+      console.log('⚠️ Not recording, ignoring stop request');
+      return;
+    }
+
+    // Clear auto-stop timeout
+    if (stopTimeoutRef.current) {
+      clearTimeout(stopTimeoutRef.current);
+      stopTimeoutRef.current = null;
+    }
+
+    // Stop the recorder (this will trigger onstop handler)
     if (mediaRecorder && mediaRecorder.state !== "inactive") {
+      console.log('🛑 Stopping MediaRecorder...');
       mediaRecorder.stop();
     }
 
-    // Cancel animation frame
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-      animationFrameRef.current = null;
+    // Stop stream tracks immediately
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
     }
 
-    setRecording(false);
+    // Note: DON'T clear chunksRef here - onstop handler needs it!
+    // Note: DON'T close audioContext here - animation loop will handle it
+    // Note: DON'T cancel animation frame - drawWave checks recorder.state
   };
 
   // SEND VOICE
@@ -302,11 +598,16 @@ export default function App() {
     try {
       const formData = new FormData();
       formData.append("file", blob, "voice.webm");
+      formData.append("user_key", currentUserKey);
 
       const res = await fetch(`${API_BASE}/api/voice`, {
         method: "POST",
         body: formData,
       });
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
 
       const data = await res.json();
 
@@ -317,7 +618,7 @@ export default function App() {
           type: "assistant",
           text: "عذراً، حدث خطأ في معالجة الصوت. الرجاء المحاولة مرة أخرى.",
         };
-        setMessages((prev) => [...prev, errorMessage]);
+        setCurrentUserMessages((prev) => [...prev, errorMessage]);
         setLoading(false);
         return;
       }
@@ -326,8 +627,8 @@ export default function App() {
       setRecentRequests(data.recent_requests || []);
 
       // Add user voice message
-      const userMessage = { type: "user", text: data.text, isVoice: true };
-      setMessages((prev) => [...prev, userMessage]);
+      const userMessage = { type: "user", text: data.text, isVoice: true, userKey: currentUserKey };
+      setCurrentUserMessages((prev) => [...prev, userMessage]);
 
       // Add assistant response with audio
       const assistantMessage = {
@@ -337,8 +638,9 @@ export default function App() {
         intent: data.intent,
         audio: data.audio, // Base64 encoded audio
         audioFormat: data.audio_format,
+        userKey: currentUserKey,
       };
-      setMessages((prev) => [...prev, assistantMessage]);
+      setCurrentUserMessages((prev) => [...prev, assistantMessage]);
 
       // Play audio response automatically
       if (data.audio) {
@@ -350,10 +652,10 @@ export default function App() {
         type: "assistant",
         text: "عذراً، حدث خطأ في الاتصال. الرجاء التحقق من اتصال الإنترنت.",
       };
-      setMessages((prev) => [...prev, errorMessage]);
+      setCurrentUserMessages((prev) => [...prev, errorMessage]);
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   // PLAY AUDIO FROM BASE64
@@ -363,6 +665,7 @@ export default function App() {
       if (currentAudioRef.current) {
         currentAudioRef.current.pause();
         currentAudioRef.current.currentTime = 0;
+        currentAudioRef.current = null;
       }
 
       // Convert base64 to blob
@@ -375,27 +678,39 @@ export default function App() {
       const blob = new Blob([byteArray], { type: "audio/mpeg" });
       const audioUrl = URL.createObjectURL(blob);
 
+      // Track URL for cleanup
+      audioUrlsRef.current.push(audioUrl);
+
       // Create and play new audio
       const audio = new Audio(audioUrl);
-      currentAudioRef.current = audio; // Track the current audio
+      currentAudioRef.current = audio;
 
       audio.play().catch(err => {
-        console.error("Audio playback failed:", err);
+        console.error("❌ Audio playback failed:", err);
+        URL.revokeObjectURL(audioUrl);
+        currentAudioRef.current = null;
       });
 
       // Cleanup when audio ends
       audio.onended = () => {
         URL.revokeObjectURL(audioUrl);
+        // Remove from tracking array
+        const idx = audioUrlsRef.current.indexOf(audioUrl);
+        if (idx > -1) audioUrlsRef.current.splice(idx, 1);
         currentAudioRef.current = null;
       };
 
       // Cleanup if audio errors
-      audio.onerror = () => {
+      audio.onerror = (err) => {
+        console.error("❌ Audio error:", err);
         URL.revokeObjectURL(audioUrl);
+        // Remove from tracking array
+        const idx = audioUrlsRef.current.indexOf(audioUrl);
+        if (idx > -1) audioUrlsRef.current.splice(idx, 1);
         currentAudioRef.current = null;
       };
     } catch (error) {
-      console.error("Error playing audio:", error);
+      console.error("❌ Error playing audio:", error);
     }
   };
   const getUserAvatar = (user) => {
@@ -432,14 +747,14 @@ export default function App() {
           type: "assistant",
           text: `${data.message}\n\nاسم الملف: ${data.file_name}\nالحجم: ${(data.file_size / 1024).toFixed(2)} كيلوبايت\nتاريخ الرفع: ${data.upload_date}`,
         };
-        setMessages((prev) => [...prev, successMessage]);
+        setCurrentUserMessages((prev) => [...prev, successMessage]);
       } else {
         // Add error message to chat
         const errorMessage = {
           type: "assistant",
           text: `❌ ${data.error}`,
         };
-        setMessages((prev) => [...prev, errorMessage]);
+        setCurrentUserMessages((prev) => [...prev, errorMessage]);
       }
     } catch (error) {
       console.error("Photo upload error:", error);
@@ -447,7 +762,7 @@ export default function App() {
         type: "assistant",
         text: "عذراً، حدث خطأ أثناء رفع الصورة. الرجاء المحاولة مرة أخرى.",
       };
-      setMessages((prev) => [...prev, errorMessage]);
+      setCurrentUserMessages((prev) => [...prev, errorMessage]);
     }
 
     setLoading(false);
@@ -556,11 +871,13 @@ export default function App() {
                   {messages.map((msg, idx) => (
                     <div key={idx} className={`chat-message ${msg.type}`}>
                       <div className="message-avatar">
-                        {msg.type === "user" ? (
-                          <img src={getUserAvatar(currentUser)} alt="User" />
-                        ) : (
-                          <img src={getBotAvatar(currentUser)} alt="Robot" />
-                        )}
+                        {(() => {
+                          const messageUser = users[msg.userKey] || currentUser;
+                          if (msg.type === "user") {
+                            return <img src={getUserAvatar(messageUser)} alt="User" />;
+                          }
+                          return <img src={getBotAvatar(messageUser)} alt="Robot" />;
+                        })()}
                       </div>
                       <div className="message-content">
                         {msg.isVoice && (
@@ -589,6 +906,9 @@ export default function App() {
                       </div>
                     </div>
                   ))}
+
+                  {/* Invisible div for auto-scroll */}
+                  <div ref={messagesEndRef} />
 
                   {/* Show suggestions after welcome message */}
                   {messages.length === 1 && messages[0].isWelcome && (
@@ -697,7 +1017,25 @@ export default function App() {
                       <span>رقم: {req.request_id}</span>
                       <span>الحالة: {req.status}</span>
                     </div>
-                    <div className="request-meta">الخدمة: {req.service_id}</div>
+                    <div className="request-meta">
+                      الخدمة: {req.service_id}
+                      {req.service_id === "5001" && req.plate && (
+                        <>
+                          <br />
+                          <small>
+                            🚗 اللوحة: {req.plate} |
+                            من: {req.from_user} → إلى: {req.to_user} |
+                            السعر: {req.price} ریال
+                          </small>
+                          {req.timestamp && (
+                            <>
+                              <br />
+                              <small>📅 {req.timestamp}</small>
+                            </>
+                          )}
+                        </>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>

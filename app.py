@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator
 from datetime import datetime
@@ -10,6 +10,7 @@ import os
 import subprocess
 import tempfile
 import uuid
+from typing import Optional
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -273,7 +274,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,  # Whitelist specific origins for security
     allow_credentials=True,
-    allow_methods=["GET", "POST"],  # Only allow necessary methods
+    allow_methods=["GET", "POST", "OPTIONS"],  # Include OPTIONS for preflight
     allow_headers=["Content-Type", "Authorization", "ngrok-skip-browser-warning"],  # Specific headers only
     max_age=3600,  # Cache preflight requests for 1 hour
 )
@@ -294,13 +295,32 @@ import whisper
 import os
 # Force GPU 1
 # os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-# Load Whisper on GPU
-whisper_model = whisper.load_model("large-v3", device="cuda")
-# Check if GPU supports fp16 (compute capability >= 7.0)
-USE_FP16 = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 7
 
-print("🔥 Whisper is running on:", torch.cuda.get_device_name(0))
-print(f"✅ Using FP16: {USE_FP16} (GPU Compute Capability: {torch.cuda.get_device_capability() if torch.cuda.is_available() else 'N/A'})")
+# Load Whisper on GPU if available, otherwise CPU
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+whisper_model = whisper.load_model("large-v3", device=DEVICE)
+
+if torch.cuda.is_available():
+    device_name = torch.cuda.get_device_name(0)
+    compute_cap = torch.cuda.get_device_capability()
+    # FP16 requires compute capability >= 7.0 and proper CUDA support
+    # Some GPUs (especially older Turing) have issues with Whisper fp16
+    USE_FP16 = compute_cap[0] >= 7 and compute_cap[0] < 10  # Safe range for fp16
+
+    # Additional safety: test if fp16 works
+    try:
+        test_tensor = torch.randn(1, 1, device=DEVICE, dtype=torch.float16)
+        del test_tensor
+    except Exception as e:
+        print(f"⚠️ FP16 test failed: {e}. Falling back to FP32")
+        USE_FP16 = False
+else:
+    device_name = "CPU"
+    compute_cap = "N/A"
+    USE_FP16 = False
+
+print(f"🔥 Whisper is running on: {device_name}")
+print(f"✅ Using FP16: {USE_FP16} (GPU Compute Capability: {compute_cap})")
 def detect_intent(user_text: str) -> str:
     prompt = f"""
 You are an intent classifier for a Saudi government services assistant (ABSHER).
@@ -474,23 +494,40 @@ def normalize(text):
     return text.lower().replace("؟", "").strip()
 
 
-def handle_intent(user_key, intent):
+def handle_intent(user_key, intent, user_text: Optional[str] = None):
     user = USERS[user_key]
     print(f"➡️ Handling intent '{intent}' for user '{user_key}'")
 
     # Switch user
     if intent == "switch_user":
-        if "ahmed" in user_key.lower():
-            STATE["current_user_key"] = "Ahmed"
-        elif "sara" in user_key.lower():
-            STATE["current_user_key"] = "Sara"
-        elif "mohammed" in user_key.lower():
-            STATE["current_user_key"] = "Mohammed"
-        elif "alex" in user_key.lower():
-            STATE["current_user_key"] = "Alex"
-        else:
-            STATE["current_user_key"] = "Ahmed"  # Default to Ahmed
-        return "🔄 تم تغيير المستخدم."
+        # Try to detect desired user from the text if available
+        target_key = None
+        text_lower = (user_text or "").lower()
+        for key in USERS.keys():
+            if key.lower() in text_lower:
+                target_key = key
+                break
+
+        # Fallback to toggling through known users
+        if not target_key:
+            if "ahmed" in user_key.lower():
+                target_key = "Ahmed"
+            elif "sara" in user_key.lower():
+                target_key = "Sara"
+            elif "mohammed" in user_key.lower():
+                target_key = "Mohammed"
+            elif "alex" in user_key.lower():
+                target_key = "Alex"
+
+        if target_key and target_key in USERS:
+            STATE["current_user_key"] = target_key
+            # Clear per-user conversational context on switch
+            STATE["conversation_history"] = []
+            STATE["pending_action"] = None
+            STATE["pending_intent"] = None
+            return f"🔄 تم تغيير المستخدم إلى {USERS[target_key]['name']}."
+
+        return "⚠️ لم أتعرف على المستخدم المطلوب. المستخدمون المتاحون: Ahmed, Sara, Mohammed, Alex."
 
     # Greeting
     if intent == "greeting":
@@ -592,17 +629,35 @@ def handle_intent(user_key, intent):
     # Unknown
     return "عذراً، لم أفهم طلبك. يمكنك تجربة:\n• جدد رخصتي\n• كم باقي على الإقامة؟\n• جدد جوازي\n• هل الخدمة مجانية؟"
 
-def text_to_speech(text: str) -> bytes:
+def text_to_speech(text: str) -> Optional[bytes]:
+    """
+    Convert text to speech using OpenAI TTS API.
+    Returns mp3 bytes or None on failure.
+    """
     try:
+        # Truncate very long text to avoid API limits
+        max_length = 4000
+        if len(text) > max_length:
+            text = text[:max_length] + "..."
+            print(f"⚠️ Text truncated to {max_length} characters for TTS")
+
         response = client.audio.speech.create(
             model="tts-1-hd",     # higher quality
             voice="onyx",         # deep male voice
             input=text,
             response_format="mp3"
         )
-        return response.read()
+        audio_bytes = response.read()
+
+        if not audio_bytes or len(audio_bytes) < 100:
+            print("❌ TTS returned empty or invalid audio")
+            return None
+
+        return audio_bytes
     except Exception as e:
-        print("❌ TTS Error:", e)
+        print(f"❌ TTS Error: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
@@ -618,6 +673,7 @@ def get_state():
 
 class TextCommand(BaseModel):
     text: str
+    user_key: Optional[str] = None
 
     @field_validator('text')
     @classmethod
@@ -770,6 +826,21 @@ def handle_pending_action_help(user_key: str, pending_intent: str, pending_actio
             response += f"   • للمقيمين: يمكن تجديد وثيقة السفر عبر الجوازات\n"
             response += f"   • للاستفسار: اتصل على 920000920\n\n"
 
+        elif req == "identity_expired":
+            response += f"{i}. ⚠️ الهوية/الإقامة منتهية:\n"
+            response += f"   • يجب تجديد الهوية/الإقامة أولاً قبل متابعة الطلب\n"
+            response += f"   • افتح أبشر → خدماتي → الأحوال المدنية/الجوازات → تجديد الهوية\n\n"
+
+        elif req == "license_expired":
+            response += f"{i}. ⚠️ رخصة القيادة منتهية:\n"
+            response += f"   • يجب سداد الرسوم وإكمال الفحص الطبي ثم تقديم طلب التجديد\n"
+            response += f"   • من أبشر: خدماتي → المرور → تجديد رخصة القيادة\n\n"
+
+        elif req == "passport_expired":
+            response += f"{i}. ⚠️ جواز السفر منتهي:\n"
+            response += f"   • احجز موعد في الجوازات أو استخدم خدمة التجديد الإلكتروني إن توفرت\n"
+            response += f"   • تأكد من خلو السجل من بلاغات فقدان\n\n"
+
     response += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     response += "📌 بعد إتمام هذه المتطلبات، يمكنك طلب التجديد مرة أخرى.\n"
     response += "\n💬 هل تحتاج مساعدة إضافية في أي من هذه المتطلبات؟"
@@ -783,53 +854,65 @@ def handle_pending_action_help(user_key: str, pending_intent: str, pending_actio
 
 @app.post("/api/command")
 def process_text(cmd: TextCommand):
-    text = normalize(cmd.text)
-    cur = STATE["current_user_key"]
+    try:
+        text = normalize(cmd.text)
+        cur = cmd.user_key if cmd.user_key and cmd.user_key in USERS else STATE["current_user_key"]
+        STATE["current_user_key"] = cur
 
-    # 1) Check if user is responding to a pending action
-    if STATE["pending_action"]:
-        # Use LLM to detect if this is a confirmation
-        context = "تم سؤال المستخدم: هل تريد المساعدة في إكمال المتطلبات الناقصة؟"
-        is_confirming = detect_user_confirmation(cmd.text, context)
+        # 1) Check if user is responding to a pending action
+        if STATE["pending_action"]:
+            # Use LLM to detect if this is a confirmation
+            context = "تم سؤال المستخدم: هل تريد المساعدة في إكمال المتطلبات الناقصة؟"
+            is_confirming = detect_user_confirmation(cmd.text, context)
 
-        if is_confirming:
-            # User confirmed they want help with missing requirements
-            visual = handle_pending_action_help(cur, STATE["pending_intent"], STATE["pending_action"])
-            STATE["last_visual"] = visual
+            if is_confirming:
+                # User confirmed they want help with missing requirements
+                visual = handle_pending_action_help(cur, STATE["pending_intent"], STATE["pending_action"])
+                STATE["last_visual"] = visual
 
-            return {
-                "intent": "help_with_requirements",
-                "text": cmd.text,
-                "current_user": USERS[cur],
-                "visual": visual,
-                "action_steps": "",
-                "recent_requests": STATE["recent_requests"]
-            }
+                return {
+                    "intent": "help_with_requirements",
+                    "text": cmd.text,
+                    "current_user": USERS[cur],
+                    "visual": visual,
+                    "action_steps": "",
+                    "recent_requests": STATE["recent_requests"]
+                }
+            else:
+                # User didn't confirm, clear pending action and treat as new request
+                STATE["pending_action"] = None
+                STATE["pending_intent"] = None
+
+        # 2) Detect intent
+        intent = detect_intent(text)
+
+        # 3) For info and unknown intents, use conversational AI with context
+        if intent in ["info", "unknown"]:
+            visual = generate_conversational_response(cmd.text, cur)
         else:
-            # User didn't confirm, clear pending action and treat as new request
-            STATE["pending_action"] = None
-            STATE["pending_intent"] = None
+            # 4) Execute specific service logic (chatbot handles it automatically)
+            visual = handle_intent(cur, intent, cmd.text)
+            # In case of user switch, refresh current user
+            cur = STATE["current_user_key"]
 
-    # 2) Detect intent
-    intent = detect_intent(text)
+        STATE["last_visual"] = visual
 
-    # 3) For info and unknown intents, use conversational AI with context
-    if intent in ["info", "unknown"]:
-        visual = generate_conversational_response(cmd.text, cur)
-    else:
-        # 4) Execute specific service logic (chatbot handles it automatically)
-        visual = handle_intent(cur, intent)
-
-    STATE["last_visual"] = visual
-
-    return {
-        "intent": intent,
-        "text": cmd.text,
-        "current_user": USERS[cur],
-        "visual": visual,
-        "action_steps": "",  # No manual steps - chatbot does it automatically
-        "recent_requests": STATE["recent_requests"]
-    }
+        return {
+            "intent": intent,
+            "text": cmd.text,
+            "current_user": USERS[cur],
+            "visual": visual,
+            "action_steps": "",  # No manual steps - chatbot does it automatically
+            "recent_requests": STATE["recent_requests"]
+        }
+    except ValueError as e:
+        # Validation errors from Pydantic
+        return {"error": f"Invalid input: {str(e)}", "intent": "error"}
+    except Exception as e:
+        print(f"❌ /api/command error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"error": "حدث خطأ في معالجة الطلب. حاول مرة أخرى.", "intent": "error"}
 
 
 class SwitchUserRequest(BaseModel):
@@ -856,7 +939,7 @@ def switch_user(request: SwitchUserRequest):
 
 def generate_welcome_notification(user_key: str) -> str:
     """
-    Generate personalized welcome notification using GPT based on user info.
+    Generate personalized welcome notification without LLM for speed.
     Highlights important alerts (expiring documents, violations, etc.)
     """
     # Validate user exists
@@ -876,7 +959,7 @@ def generate_welcome_notification(user_key: str) -> str:
         identity_expiry = "غير متوفر"
 
     # Calculate days until expiry if available
-    days_until_expiry = "غير معروف"
+    days_until_expiry: Optional[int] = None
     if identity and identity.get("expiry_date"):
         try:
             expiry_date = datetime.strptime(identity["expiry_date"], "%Y-%m-%d")
@@ -884,7 +967,7 @@ def generate_welcome_notification(user_key: str) -> str:
             days_until_expiry = (expiry_date - today).days
         except Exception as e:
             print(f"⚠️ Error calculating expiry days for {user_key}: {e}")
-            days_until_expiry = "غير معروف"
+            days_until_expiry = None
 
     # Get license info with default empty dict
     license_info = user.get("driver_license", {})
@@ -896,43 +979,38 @@ def generate_welcome_notification(user_key: str) -> str:
     violations_amount = violations.get("total_amount", 0) if violations else 0
     service_block = violations.get("service_block", False) if violations else False
 
-    prompt = f"""
-أنت مساعد ذكي لمنصة أبشر. قم بإنشاء رسالة ترحيب شخصية للمستخدم التالي:
+    # Build a concise, deterministic notification
+    parts = [f"مرحباً {user['name']}! 👋"]
 
-معلومات المستخدم:
-- الاسم: {user['name']}
-- النوع: {user['user_type']}
-- حالة الهوية/الإقامة: {identity_status}
-- تاريخ انتهاء الهوية/الإقامة: {identity_expiry} (متبقي {days_until_expiry} يوم)
-- حالة رخصة القيادة: {license_status}
-- المخالفات المرورية: {violations_count} مخالفة بقيمة {violations_amount} ريال{"- تمنع الخدمات!" if service_block else ""}
+    # Identity status
+    if identity_status == "expired":
+        if isinstance(days_until_expiry, int):
+            parts.append(f"❌ الهوية/الإقامة منتهية منذ {abs(days_until_expiry)} يوم. يرجى التجديد فوراً.")
+        else:
+            parts.append("❌ الهوية/الإقامة منتهية. يرجى التجديد فوراً.")
+    elif identity_status == "near_expiry" or (isinstance(days_until_expiry, int) and days_until_expiry <= 60):
+        if isinstance(days_until_expiry, int):
+            parts.append(f"⚠️ الهوية/الإقامة تنتهي خلال {days_until_expiry} يوم (تاريخ {identity_expiry}).")
+        else:
+            parts.append(f"⚠️ الهوية/الإقامة تقترب من الانتهاء (تاريخ {identity_expiry}).")
+    else:
+        parts.append(f"✅ الهوية/الإقامة سارية حتى {identity_expiry}.")
 
-تعليمات:
-1. ابدأ بترحيب شخصي باسم المستخدم
-2. إذا كان هناك مشاكل عاجلة (هوية تنتهي قريباً، مخالفات، رخصة منتهية)، نبّه عليها بوضوح
-3. اذكر الإيجابيات إن وجدت (كل شيء صالح، لا مخالفات)
-4. كن موجزاً ومباشراً (2-4 جمل فقط)
-5. استخدم أيقونات مناسبة (✅ ⚠️ ❌ 📅 🚗)
+    # License status
+    if license_status == "expired":
+        parts.append("❌ رخصة القيادة منتهية.")
+    elif license_status == "near_expiry":
+        parts.append("⚠️ رخصة القيادة تقترب من الانتهاء.")
 
-مثال للتنبيهات:
-- إذا كانت الهوية expired: تنبيه عاجل
-- إذا كانت الهوية near_expiry: تنبيه بالتجديد قريباً
-- إذا كانت المخالفات تمنع الخدمات: تنبيه عاجل بضرورة السداد
-- إذا كانت المخالفات موجودة لكن لا تمنع: اذكرها كتذكير
+    # Violations
+    if service_block:
+        parts.append(f"🚫 يوجد إيقاف خدمات بسبب مخالفات بقيمة {violations_amount} ريال. السداد مطلوب.")
+    elif violations_count > 0:
+        parts.append(f"📄 لديك {violations_count} مخالفة بقيمة {violations_amount} ريال.")
+    else:
+        parts.append("✅ لا توجد مخالفات حالية.")
 
-اكتب الرسالة فقط بدون أي شرح إضافي:
-"""
-
-    try:
-        response = client.chat.completions.create(
-            model=GPT_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7
-        )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        print(f"❌ Welcome notification generation failed: {e}")
-        return f"مرحباً {user['name']}! 👋"
+    return " ".join(parts)
 
 
 @app.get("/api/notification/{user_key}")
@@ -1406,8 +1484,13 @@ def validate_service_requirements(user_key: str, intent: str) -> dict:
             status = identity.get("status")
             expiry_date_str = identity.get("expiry_date")
 
-            # Check if document needs renewal
-            if status == "valid":
+            if status == "expired":
+                missing_requirements.append("identity_expired")
+                missing_fields.append("الهوية/الإقامة منتهية ويجب التجديد فوراً")
+            elif status == "near_expiry":
+                # Allowed to proceed, but still valid to renew
+                pass
+            elif status == "valid":
                 # Calculate days until expiry
                 expiry_date = datetime.strptime(expiry_date_str, "%Y-%m-%d")
                 days_left = (expiry_date - datetime.now()).days
@@ -1421,23 +1504,30 @@ def validate_service_requirements(user_key: str, intent: str) -> dict:
                 missing_requirements.append("photo_update_needed")
                 missing_fields.append("صورة شخصية حديثة")
 
-        # Check for violations that block service
+        # Check for violations (either blocking or unpaid, not both)
         violations = user.get("violations", {})
         if violations.get("service_block"):
             missing_requirements.append("service_blocking_violations")
             missing_fields.append(f"مخالفات مرورية تمنع الخدمة بقيمة {violations.get('total_amount')} ريال")
         elif violations.get("total_amount", 0) > 0:
+            # Only add unpaid violations if not already blocking
             missing_requirements.append("unpaid_violations")
             missing_fields.append(f"مخالفات مرورية بقيمة {violations.get('total_amount')} ريال (يُنصح بسدادها)")
 
     # Driver License Renewal
     elif intent == "driver_license_renewal":
-        # Check violations only (removed medical check - not fully automatable)
+        license_info = user.get("driver_license", {})
+        if license_info.get("status") == "expired":
+            missing_requirements.append("license_expired")
+            missing_fields.append("رخصة القيادة منتهية، يجب التجديد")
+
+        # Check violations only (either blocking or unpaid, not both)
         violations = user.get("violations", {})
         if violations.get("service_block"):
             missing_requirements.append("service_blocking_violations")
             missing_fields.append(f"مخالفات مرورية تمنع الخدمة بقيمة {violations.get('total_amount')} ريال")
         elif violations.get("total_amount", 0) > 0:
+            # Only add unpaid violations if not already blocking
             missing_requirements.append("unpaid_violations")
             missing_fields.append(f"مخالفات مرورية بقيمة {violations.get('total_amount')} ريال")
 
@@ -1447,6 +1537,11 @@ def validate_service_requirements(user_key: str, intent: str) -> dict:
         if user["user_type"] != "المواطن":
             missing_requirements.append("not_citizen")
             missing_fields.append("الجنسية السعودية (الخدمة للمواطنين فقط)")
+
+        passport = user.get("passport", {})
+        if passport.get("status") == "expired":
+            missing_requirements.append("passport_expired")
+            missing_fields.append("جواز السفر منتهي ويجب التجديد عبر القنوات الرسمية")
 
         # Check for violations
         violations = user.get("violations", {})
@@ -1513,11 +1608,17 @@ def get_service_requirements_info(intent: str) -> str:
 
 
 @app.post("/api/voice")
-async def process_voice(file: UploadFile = File(...)):
+async def process_voice(file: UploadFile = File(...), user_key: Optional[str] = Form(None)):
     webm_path = None
     wav_path = None
 
     try:
+        # Validate content type early
+        allowed_audio_types = {"audio/webm", "audio/ogg", "audio/mpeg", "audio/mp4", "audio/wav", "application/octet-stream", ""}
+        base_content_type = (file.content_type or "").split(";")[0].strip()
+        if base_content_type not in allowed_audio_types:
+            return {"error": f"Unsupported audio type: {file.content_type}"}
+
         # Validate file size (max 10MB)
         audio_bytes = await file.read()
         max_size = 10 * 1024 * 1024  # 10MB
@@ -1580,7 +1681,11 @@ async def process_voice(file: UploadFile = File(...)):
             return {"error": "Speech transcription failed"}
 
         # Intent → Action
-        cur = STATE["current_user_key"]
+        cur = user_key if user_key and user_key in USERS else STATE["current_user_key"]
+        STATE["current_user_key"] = cur
+
+        intent = None
+        visual = None
 
         # 1) Check if user is responding to a pending action
         if STATE["pending_action"]:
@@ -1596,16 +1701,10 @@ async def process_voice(file: UploadFile = File(...)):
                 # User didn't confirm, clear pending action and treat as new request
                 STATE["pending_action"] = None
                 STATE["pending_intent"] = None
-                intent = detect_intent(text)
+                # Fall through to normal processing
 
-                # For info and unknown intents, use conversational AI with context
-                if intent in ["info", "unknown"]:
-                    visual = generate_conversational_response(text, cur)
-                else:
-                    # Execute specific service logic
-                    visual = handle_intent(cur, intent)
-        else:
-            # No pending action, process normally
+        # 2) If no intent yet (not confirmed help), detect intent
+        if intent is None:
             intent = detect_intent(text)
 
             # For info and unknown intents, use conversational AI with context
@@ -1613,7 +1712,9 @@ async def process_voice(file: UploadFile = File(...)):
                 visual = generate_conversational_response(text, cur)
             else:
                 # Execute specific service logic (chatbot handles it automatically)
-                visual = handle_intent(cur, intent)
+                visual = handle_intent(cur, intent, text)
+                # Refresh current user in case the intent changed it (e.g., switch_user)
+                cur = STATE["current_user_key"]
 
         # Use the visual message directly (no manual steps)
         final_text = visual
@@ -1622,7 +1723,18 @@ async def process_voice(file: UploadFile = File(...)):
         audio_output = text_to_speech(final_text)
 
         if audio_output is None:
-            return {"error": "TTS failed"}
+            # TTS failed, but still return the text response
+            print("⚠️ TTS failed, returning text-only response")
+            STATE["last_visual"] = visual
+            return {
+                "intent": intent,
+                "text": text,
+                "current_user": USERS[cur],
+                "visual": visual,
+                "action_steps": "",
+                "recent_requests": STATE["recent_requests"],
+                "error": "تعذر تحويل النص إلى صوت، لكن الرد متوفر كنص."
+            }
 
         # Encode audio as base64 to include in JSON response
         audio_base64 = base64.b64encode(audio_output).decode('utf-8')
@@ -1673,4 +1785,4 @@ async def process_voice(file: UploadFile = File(...)):
 # ============================================
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
